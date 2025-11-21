@@ -1,6 +1,7 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
+const csv = require('csv-parser');
 
 function delay(ms) { return new Promise(res => setTimeout(res, ms)); }
 
@@ -11,36 +12,32 @@ function emitLogCb(onLog, level, message, meta){
   else if(level==='warn') console.warn(message, meta||'');
   else console.log(message, meta||'');
 }
-// =================================================================
-// FUNÇÃO DE LEITURA DE CSV CORRIGIDA
-// =================================================================
-const csv = require('csv-parser');
 
-// LINHA CORRETA (COM O 'await')
-cpfs = await readCpfsFromCsv(filePath, onLog);
+// =================================================================
+// FUNÇÃO DE LEITURA DE CSV PROFISSIONAL (BASEADA NO autorizador.js)
+// =================================================================
+function readCpfsFromCsv(filePath, onLog) {
     return new Promise((resolve, reject) => {
         if (!filePath) {
             return resolve([]);
         }
 
-        emitLogCb(onLog, 'info', `Iniciando leitura PROFISSIONAL do arquivo CSV: ${filePath}`);
+        emitLogCb(onLog, 'info', `Iniciando leitura profissional do arquivo CSV: ${filePath}`);
         const cpfs = [];
 
         fs.createReadStream(filePath)
             .pipe(csv({ 
                 separator: ';', // Tenta com ponto-e-vírgula primeiro
-                mapHeaders: ({ header }) => header.trim().toLowerCase() // Padroniza o cabeçalho
+                mapHeaders: ({ header }) => header.trim().toLowerCase()
             }))
             .on('data', (row) => {
-                // Procura por 'cpf' ou 'documento' no cabeçalho
                 const cpfKey = Object.keys(row).find(key => key.includes('cpf') || key.includes('documento'));
                 if (cpfKey && row[cpfKey]) {
                     const digits = (row[cpfKey] || '').replace(/\\D/g, '');
                     if (digits.length === 11) {
                         cpfs.push(digits);
                     }
-                // Se não achar cabeçalho, pega a primeira coluna
-                } else if (row['cpf']) { // O parser pode nomear como 'cpf' por padrão
+                } else if (row['cpf']) {
                      const digits = (row['cpf'] || '').replace(/\\D/g, '');
                      if (digits.length === 11) {
                         cpfs.push(digits);
@@ -52,7 +49,7 @@ cpfs = await readCpfsFromCsv(filePath, onLog);
                  if (uniqueCpfs.length > 0) {
                     emitLogCb(onLog, 'info', `Leitura finalizada. Encontrados ${uniqueCpfs.length} CPFs únicos.`);
                 } else {
-                    emitLogCb(onLog, 'warn', 'Nenhum CPF válido foi encontrado no arquivo usando o leitor profissional.');
+                    emitLogCb(onLog, 'warn', 'Nenhum CPF válido foi encontrado no arquivo.');
                 }
                 resolve(uniqueCpfs);
             })
@@ -61,6 +58,7 @@ cpfs = await readCpfsFromCsv(filePath, onLog);
                 reject(err);
             });
     });
+}
 // =================================================================
 
 async function navigateToConsulta(page, baseUrl, onLog) {
@@ -121,7 +119,8 @@ async function runMargem(payload, onProgress, onLog){
 
   let cpfs = [];
   if (filePath) {
-      cpfs = readCpfsFromCsv(filePath, onLog);
+      // ESTA É A CHAMADA CORRETA, COM 'await', DENTRO DA FUNÇÃO 'async'
+      cpfs = await readCpfsFromCsv(filePath, onLog);
   } else if (cpf) {
       const singleCpf = (cpf||'').replace(/\\D/g,'');
       if(singleCpf.length === 11) cpfs = [singleCpf];
