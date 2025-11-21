@@ -80,15 +80,10 @@ ipcMain.on("start-automation", async (event, payload) => {
 });
 
 ipcMain.on("start-margem", async (event, payload) => {
-  // payload expected: { url, email, password, cpf, steps, options }
-  const url = payload && payload.url;
-  const email = payload && payload.email;
-  const password = payload && payload.password;
-  const cpf = payload && payload.cpf;
-  const steps = payload && payload.steps;
-  const options = payload && payload.options ? payload.options : {};
-
-  event.reply("automation-log", { level: "info", message: `Recebido start-margem: ${url}` });
+  // A correção é simplesmente passar o payload ORIGINAL e COMPLETO para o robô.
+  // O robo/margem.js já está preparado para encontrar o filePath dentro dele.
+  
+  event.reply("automation-log", { level: "info", message: `Payload recebido e encaminhado para o robô: ${JSON.stringify(payload)}` });
 
   try {
     const runMargem = require("./robo/margem.js");
@@ -96,7 +91,8 @@ ipcMain.on("start-margem", async (event, payload) => {
     const progressCb = (progress) => event.reply("automation-progress", progress);
     const logCb = (log) => event.reply("automation-log", log);
 
-    await runMargem({ url, email, password, cpf, steps, options }, progressCb, logCb);
+    // Agora, o payload completo é passado, incluindo o precioso filePath.
+    await runMargem(payload, progressCb, logCb);
 
     event.reply("automation-finished", "Consulta de margem concluída com sucesso!");
   } catch (err) {
