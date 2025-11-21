@@ -13,91 +13,43 @@ function emitLogCb(onLog, level, message, meta){
   else console.log(message, meta||'');
 }
 
-// =================================================================
-// FUNÇÃO DE LEITURA DE CSV
-// =================================================================
 function readCpfsFromCsv(filePath, onLog) {
     return new Promise((resolve, reject) => {
-        const absolutePath = path.resolve(filePath);
-        if (!fs.existsSync(absolutePath)) {
-            emitLogCb(onLog, 'error', `[LEITOR] FALHA CRÍTICA: O arquivo não existe no caminho: ${absolutePath}`);
-            return resolve([]);
-        }
         const cpfs = [];
-        fs.createReadStream(absolutePath)
+        fs.createReadStream(path.resolve(filePath))
             .pipe(csv({ separator: ';', mapHeaders: ({ header }) => header.trim().toLowerCase() }))
             .on('data', (row) => {
                 const cpfKey = Object.keys(row).find(key => key.includes('cpf') || key.includes('documento'));
                 if (cpfKey && row[cpfKey]) {
-                    const digits = (row[cpfKey] || '').replace(/\\D/g, '');
+                    const digits = (row[cpfKey] || '').replace(/\D/g, '');
                     if (digits.length === 11) cpfs.push(digits);
                 }
             })
             .on('end', () => {
-                const uniqueCpfs = Array.from(new Set(cpfs));
-                emitLogCb(onLog, 'info', `Leitura finalizada. Encontrados ${uniqueCpfs.length} CPFs únicos.`);
-                resolve(uniqueCpfs);
+                emitLogCb(onLog, 'info', `Leitura finalizada. Encontrados ${Array.from(new Set(cpfs)).length} CPFs únicos.`);
+                resolve(Array.from(new Set(cpfs)));
             })
             .on('error', (err) => {
-                emitLogCb(onLog, 'error', `[LEITOR] Erro CRÍTICO no parser do CSV: ${err.message}`);
+                emitLogCb(onLog, 'error', `Erro ao ler o CSV: ${err.message}`);
                 reject(err);
             });
     });
 }
 
-// =================================================================
-// FUNÇÃO DE NAVEGAÇÃO (QUE ESTAVA FALTANDO)
-// =================================================================
 async function navigateToConsulta(page, baseUrl, onLog) {
-  const targetUrlPart = '/clt/consultar';
-  const currentUrl = page.url();
-
-  if (currentUrl.includes(targetUrlPart)) {
-    await page.waitForLoadState('networkidle', { timeout: 2000 }).catch(() => {});
-    return;
-  }
-  
-  emitLogCb(onLog, 'info', 'Navegando para a página de Consulta Margem.');
-  let navigated = false;
-
-  try {
-    if (baseUrl) {
-      const direct = new URL(targetUrlPart, baseUrl).href;
-      await page.goto(direct, { timeout: 20000, waitUntil: 'networkidle' });
-      await delay(800);
-      if (page.url().includes(targetUrlPart)) navigated = true;
-    }
-  } catch (e) {
-    emitLogCb(onLog, 'warn', `Falha na navegação direta: ${e.message}`);
-  }
-
-  if (!navigated) {
-    const linkCandidates = [
-      'a[href="/clt/consultar"]', 'a[href*="/clt"]', 'a:has-text("Consulta Margem")',
-      'a:has-text("Consultar Margem")', 'a:has-text("Margem")'
-    ];
-    for (const sel of linkCandidates) {
-      try {
-        const el = await page.$(sel);
-        if (!el) continue;
-        await el.click({ timeout: 5000 }).catch(() => {});
-        await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {});
-        if (page.url().includes(targetUrlPart)) {
-          navigated = true;
-          break;
-        }
-      } catch (e) { /* ignore and try next */ }
-    }
-  }
-  
-  if (!navigated) {
-    throw new Error('Falha ao navegar para a página de consulta.');
-  }
+    const targetUrlPart = '/clt/consultar';
+    if (page.url().includes(targetUrlPart)) return;
+    emitLogCb(onLog, 'info', 'Navegando para a página de Consulta Margem.');
+    await page.goto(new URL(targetUrlPart, baseUrl).href, { timeout: 20000, waitUntil: 'networkidle' });
 }
 
-// =================================================================
-// FUNÇÃO PRINCIPAL DO ROBÔ
-// =================================================================
+// FUNÇÃO UTILITÁRIA PARA FORMATAR O CPF
+function formatCpf(cpf) {
+    const cpfDigits = cpf.replace(/\D/g, '');
+    if (cpfDigits.length !== 11) return cpf;
+    return cpfDigits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+}
+
 async function runMargem(payload, onProgress, onLog){
   emitLogCb(onLog, 'info', `Payload recebido: ${JSON.stringify(payload)}`);
   
@@ -140,7 +92,6 @@ async function runMargem(payload, onProgress, onLog){
     if (password) await page.fill('input[type="password"], input[name*=pass i]', password);
     
     await page.click('button[type="submit"], button:has-text("Fazer login")');
-    // TIMING OTIMIZADO: Reduzido de 15s para 10s
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(()=>{});
 
     await navigateToConsulta(page, url, onLog);
@@ -159,19 +110,17 @@ async function runMargem(payload, onProgress, onLog){
         const cpfInputHandle = await page.waitForSelector(cpfSelector, { state: 'visible', timeout: 10000 });
         await cpfInputHandle.fill(currentCpf);
         emitLogCb(onLog, 'info', `CPF ${currentCpf} inserido.`);
-
-        // ============================================================================================
-        // ATENÇÃO: AINDA PRECISAMOS RESOLVER O "VÍNCULO EMPREGATÍCIO"
-        // Se este campo for obrigatório, o robô vai falhar aqui. Me diga o que fazer.
-        // ============================================================================================
         
         emitLogCb(onLog, 'info', 'Clicando no botão de consulta...');
         const buttonSelector = 'button:has-text("Consultar saldo")';
         await page.click(buttonSelector);
         
         emitLogCb(onLog, 'info', 'Aguardando resultado aparecer no histórico de consultas...');
-        const resultSelector = `xpath=//tr[contains(., '${currentCpf}')]//td[contains(@class, 'table-status')]//span`;
-        // TIMING OTIMIZADO: Reduzido de 20s para 10s
+        
+        // CORREÇÃO: Usando o CPF formatado para encontrar o resultado
+        const formattedCpfForSearch = formatCpf(currentCpf);
+        const resultSelector = `xpath=//tr[contains(., '${formattedCpfForSearch}')]//td[contains(@class, 'table-status')]//span`;
+        
         const resultEl = await page.waitForSelector(resultSelector, { timeout: 10000 });
         
         const resultText = (await resultEl.innerText()).trim();
@@ -206,7 +155,6 @@ async function runMargem(payload, onProgress, onLog){
         const percent = Math.round(((i+1)/cpfs.length)*100);
         onProgress({ current: i+1, total: cpfs.length, percent, message: `Processado ${i+1}/${cpfs.length}` });
       }
-      // TIMING OTIMIZADO: Delay reduzido de 1000ms para 250ms
       await delay(250); 
     }
   } catch (err) {
@@ -216,9 +164,5 @@ async function runMargem(payload, onProgress, onLog){
     emitLogCb(onLog,'info','Finalizando execução da margem');
   }
 }
-
-
-
-
 
 module.exports = runMargem;
