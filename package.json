@@ -1,0 +1,26 @@
+{
+"name": "lhamascred-autorizador",
+"version": "1.0.0",
+"description": "Aplicativo desktop Electron com automação Playwright para Autorizador em Massa",
+"main": "main.js",
+"scripts": {
+"start": "electron .",
+"postinstall": "npx playwright install --with-deps",
+"pack": "electron-builder --dir",
+"dist": "electron-builder"
+},
+"build": {
+"appId": "com.lhamascred.autorizador",
+"productName": "LhamasCred Autorizador",
+"files": ["**/*"],
+"win": { "target": "nsis" }
+},
+"dependencies": {
+"csv-parser": "^3.0.0",
+"electron": "^26.0.0",
+"playwright": "^1.42.0"
+},
+"devDependencies": {
+"electron-builder": "^24.0.0"
+}
+}

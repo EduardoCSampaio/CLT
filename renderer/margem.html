@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Consulta de Margem</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-black text-white p-6">
+
+<h1 class="text-2xl font-bold text-yellow-400 mb-4">Consulta de Margem</h1>
+<!-- Banner instrução para o usuário preencher credenciais -->
+<div id="margemBanner" class="mb-4 p-3 rounded bg-yellow-500 text-black font-semibold">Informe seu E-MAIL e SENHA para login. Cada cliente deve usar suas credenciais para não interferir em outros acessos.</div>
+<p class="text-gray-300 mb-4">Informe suas credenciais abaixo para prosseguir com a consulta de margem.</p>
+
+<div class="space-y-4 max-w-2xl">
+  <label class="text-sm text-gray-300">E-mail
+    <input id="margemEmail" type="email" class="w-full mt-1 p-2 rounded bg-gray-900 border border-gray-700" />
+  </label>
+
+  <label class="text-sm text-gray-300">Senha
+    <input id="margemPassword" type="password" class="w-full mt-1 p-2 rounded bg-gray-900 border border-gray-700" />
+  </label>
+
+  <label class="flex items-center space-x-2 text-sm">
+    <input type="checkbox" id="margemHeadless" class="rounded" />
+    <span>Executar em headless (não mostrar navegador)</span>
+  </label>
+
+  <label class="text-sm text-gray-300">Arquivo CSV (lista de CPFs)
+    <input id="margemFile" type="file" accept=".csv" class="w-full mt-1 p-2 rounded bg-gray-900 border border-gray-700" />
+  </label>
+
+  <div class="w-full h-4 bg-gray-700 rounded">
+    <div id="progressBar" class="h-4 bg-yellow-500 rounded" style="width: 0%;"></div>
+  </div>
+  <p id="progressText" class="text-gray-300 text-sm">Aguardando início...</p>
+
+  <button id="startMargem" class="w-full py-3 bg-yellow-500 text-black font-bold rounded-lg hover:bg-yellow-400">Iniciar Consulta</button>
+
+  <div class="mt-4">
+    <h3 class="text-sm text-gray-300 mb-2">Logs</h3>
+    <pre id="logArea" class="w-full h-48 p-3 bg-gray-900 text-xs font-mono rounded border border-gray-700 overflow-y-auto"></pre>
+  </div>
+</div>
+
+<script src="renderer.js"></script>
+</body>
+</html>

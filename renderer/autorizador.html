@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autorizador em Massa</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+
+<body class="bg-black text-white p-6 relative">
+
+<!-- Botão de casa no canto superior direito -->
+<button id="backToIndex" title="Voltar para página principal" class="absolute top-4 right-4 p-2 rounded-full bg-gray-800 hover:bg-yellow-400 transition">
+  <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7m-9 2v6m4-6v6m5-6l2 2m-2-2v6a2 2 0 01-2 2H7a2 2 0 01-2-2v-6" />
+  </svg>
+</button>
+
+<h1 class="text-2xl font-bold text-yellow-400 mb-4">Autorizador em Massa</h1>
+<p class="text-gray-300 mb-6">Selecione o arquivo CSV/Excel e inicie o processo.</p>
+
+<div class="space-y-4">
+  <input 
+    type="file" 
+    id="fileInput"
+    accept=".csv,.xlsx"
+    class="block w-full p-3 rounded-lg bg-gray-900 border border-gray-700"
+  />
+
+  <!-- Options: headless and typing speed -->
+  <div class="flex items-center space-x-4">
+    <label class="flex items-center space-x-2 text-sm">
+      <input type="checkbox" id="headlessCheckbox" class="rounded" />
+      <span>Executar em headless (não mostrar navegador)</span>
+    </label>
+  </div>
+
+  <div class="grid grid-cols-2 gap-3">
+    <label class="text-sm text-gray-300">
+      Tempo de escrita mínimo (segundos)
+      <input id="minTypingSec" type="number" min="0.1" step="0.1" value="1" class="w-full mt-1 p-2 rounded bg-gray-900 border border-gray-700" />
+    </label>
+    <label class="text-sm text-gray-300">
+      Tempo de escrita máximo (segundos)
+      <input id="maxTypingSec" type="number" min="0.1" step="0.1" value="5" class="w-full mt-1 p-2 rounded bg-gray-900 border border-gray-700" />
+    </label>
+  </div>
+
+  <!-- Barra de progresso -->
+  <div class="w-full h-4 bg-gray-700 rounded">
+    <div id="progressBar" class="h-4 bg-yellow-500 rounded" style="width: 0%;"></div>
+  </div>
+
+  <p id="progressText" class="text-gray-300 text-sm">Aguardando início...</p>
+
+  <button 
+    id="startAutomation"
+    class="w-full py-3 bg-yellow-500 text-black font-bold rounded-lg hover:bg-yellow-400">
+    Iniciar Automação
+  </button>
+
+  <!-- Log area -->
+  <div class="mt-4">
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="text-sm text-gray-300">Logs</h3>
+    </div>
+    <pre id="logArea" class="w-full h-48 p-3 bg-gray-900 text-xs font-mono rounded border border-gray-700 overflow-y-auto"></pre>
+  </div>
+</div>
+
+<script src="renderer.js"></script>
+</body>
+</html>
