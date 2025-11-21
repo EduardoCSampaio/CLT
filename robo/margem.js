@@ -126,12 +126,11 @@ async function runMargem(payload, onProgress, onLog){
   const context = await browser.newContext();
   const page = await context.newPage();
   
-  let resultsPath = null;
   const outDir = path.join(process.cwd(), 'Relatórios Margem');
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   const ts = new Date().toISOString().replace(/[:.]/g,'-');
-  resultsPath = path.join(outDir, `resultado-${ts}.csv`);
-  try { fs.writeFileSync(resultsPath, 'CPF;OPERAÇÃO;OBS\\n', { encoding: 'utf8' }); } catch(e) {}
+  const resultsPath = path.join(outDir, `resultado-${ts}.csv`);
+  try { fs.writeFileSync(resultsPath, 'CPF;OPERACAO;OBS\n', { encoding: 'utf8' }); } catch(e) {}
 
   try {
     emitLogCb(onLog, 'info', `Navegando para ${url}`);
@@ -154,38 +153,36 @@ async function runMargem(payload, onProgress, onLog){
       try {
         await navigateToConsulta(page, url, onLog);
         
-        emitLogCb(onLog, 'info', 'Procurando pelo campo de CPF...');
-        const cpfInput = await page.waitForSelector('input[placeholder*="CPF"], input[name*=cpf i], input[id*=cpf i]', { timeout: 5000 });
-        
-        await cpfInput.click({ clickCount: 3 });
-        await cpfInput.press('Backspace');
-        await cpfInput.type(currentCpf, { delay: 80 });
+        emitLogCb(onLog, 'info', 'Procurando pelo campo CPF com o seletor exato e com paciência...');
+        const cpfSelector = 'input[placeholder="000.000.000-00"]';
+        const cpfInputHandle = await page.waitForSelector(cpfSelector, { state: 'visible', timeout: 10000 });
+
+        if (!cpfInputHandle) throw new Error('Timeout: Campo CPF não encontrado na página após 10 segundos.');
+
+        emitLogCb(onLog, 'info', 'Campo CPF encontrado! Preenchendo...');
+        await cpfInputHandle.click({ clickCount: 3 });
+        await cpfInputHandle.press('Backspace');
+        await cpfInputHandle.fill(currentCpf);
         emitLogCb(onLog, 'info', `CPF ${currentCpf} inserido.`);
 
-        await delay(500);
-
+        // ============================================================================================
+        // ATENÇÃO: Se o campo "Vínculo empregatício" for obrigatório, o código abaixo precisa ser ativado.
+        // Por favor, me informe o que deve ser inserido neste campo.
+        // Exemplo:
+        // const vinculoInput = await page.waitForSelector('input[placeholder="Vínculo empregatício"]', { state: 'visible' });
+        // await vinculoInput.fill("VALOR_A_SER_INSERIDO");
+        // emitLogCb(onLog, 'info', 'Campo Vínculo empregatício preenchido.');
+        // ============================================================================================
+        
         emitLogCb(onLog, 'info', 'Procurando e clicando no botão de consulta...');
-        const buttonSelectors = [
-            'button:has-text("Consultar")', 'button:has-text("Consultar saldo")',
-            'button:has-text("Buscar")', 'button[type="submit"]'
-        ];
-        let clicked = false;
-        for (const selector of buttonSelectors) {
-            try {
-                await page.click(selector, { timeout: 500 });
-                emitLogCb(onLog, 'info', `Botão clicado com seletor: ${selector}`);
-                clicked = true;
-                break;
-            } catch (e) { /* Tente o próximo */ }
-        }
-
-        if (!clicked) {
-            emitLogCb(onLog, 'warn', 'Nenhum botão de consulta encontrado. Tentando pressionar "Enter".');
-            await cpfInput.press('Enter');
-        }
-
+        const buttonSelector = 'button:has-text("Consultar saldo")';
+        const button = await page.waitForSelector(buttonSelector, { state: 'visible', timeout: 5000 });
+        
+        await button.click();
+        emitLogCb(onLog, 'info', `Botão "${buttonSelector}" clicado com sucesso.`);
+        
         emitLogCb(onLog, 'info', 'Aguardando resultado...');
-        await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+        await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
         const resultEl = await page.waitForSelector('.result, .saldo, .resultado, #resultado, .card-body, .balance', { timeout: 10000 });
         
         const resultText = await resultEl.innerText();
@@ -223,6 +220,7 @@ async function runMargem(payload, onProgress, onLog){
     emitLogCb(onLog,'info','Finalizando execução da margem');
   }
 }
+
 
 
 module.exports = runMargem;
