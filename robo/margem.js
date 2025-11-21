@@ -151,21 +151,17 @@ async function runMargem(payload, onProgress, onLog){
 
     await navigateToConsulta(page, url, onLog);
     
-    let consultButtonSelector = null;
+    let consultButtonSelector = 'button:has-text("Consultar saldo")'; // From user feedback
     try {
-      const btnSelectors = [
-        'button:has-text("Consultar saldo")', 'button.is-success',
-        'button[type="submit"]:has-text("Consultar")', 'button:has-text("Consultar")'
-      ];
-      for (const bsel of btnSelectors){
-        try{
-          const btn = await page.$(bsel);
-          if (btn){ consultButtonSelector = bsel; emitLogCb(onLog,'info',`Botão de consulta encontrado via ${bsel}`); break; }
-        }catch(e){}
-      }
-      if(!consultButtonSelector) emitLogCb(onLog,'warn',"Botão 'Consultar saldo' não encontrado automaticamente");
+        const btn = await page.waitForSelector(consultButtonSelector, { timeout: 5000 });
+        if (btn) {
+            emitLogCb(onLog,'info',`Botão de consulta encontrado via ${consultButtonSelector}`);
+        } else {
+            throw new Error('Botão de consulta não encontrado');
+        }
     } catch (e) {
-      emitLogCb(onLog, 'warn', `Erro durante busca do botão de consulta: ${e && e.message}`);
+      emitLogCb(onLog, 'warn', `Botão 'Consultar saldo' não encontrado: ${e && e.message}`);
+      consultButtonSelector = null;
     }
 
     if (steps && steps.trim()){
@@ -207,29 +203,23 @@ async function runMargem(payload, onProgress, onLog){
         let cpfInputHandle = null;
         emitLogCb(onLog, 'info', 'Tentando localizar input de CPF...');
         const cpfCandidateSelectors = [
-          'input[name*=cpf i]', 'input[id*=cpf i]', 'input[placeholder*=cpf i]',
-          'input[placeholder*="000" i]', 'input[maxlength="15"]', 'input[type="tel"]',
-          'input[class*=document i]', 'div.document-input input', 'div.control.document-input input',
-          'input[type=text]'
+          'div.control.document-input input[type="tel"]', // Specific from user feedback
+          'input[placeholder="000.000.000-00"]', // Specific from user feedback
+          `xpath=//label[contains(translate(., 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'), 'CPF')]/following::input[1]`,
+          'input[name*=cpf i]', 
+          'input[id*=cpf i]', 
+          'input[type="tel"]',
         ];
 
-        try {
-          const xpath = `xpath=//label[contains(translate(., 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'), 'CPF')]/following::input[1]`;
-          cpfInputHandle = await page.$(xpath);
-          if (cpfInputHandle) emitLogCb(onLog, 'info', 'Encontrado input CPF via label XPath');
-        } catch (e) { /* ignore */ }
-
-        if (!cpfInputHandle) {
-          for (const s of cpfCandidateSelectors) {
-            try {
-              const el = await page.$(s);
-              if (el) {
-                cpfInputHandle = el;
-                emitLogCb(onLog, 'info', `Encontrado input CPF via selector: ${s}`);
-                break;
-              }
-            } catch (e) {}
-          }
+        for (const s of cpfCandidateSelectors) {
+          try {
+            const el = await page.waitForSelector(s, { timeout: 2000 });
+            if (el) {
+              cpfInputHandle = el;
+              emitLogCb(onLog, 'info', `Encontrado input CPF via selector: ${s}`);
+              break;
+            }
+          } catch (e) {}
         }
 
         if (!cpfInputHandle){
@@ -237,18 +227,21 @@ async function runMargem(payload, onProgress, onLog){
         }
 
         try{
-          await cpfInputHandle.fill('');
-          await cpfInputHandle.fill(currentCpf);
+          emitLogCb(onLog, 'info', `Tentando preencher CPF ${currentCpf}`);
+          await cpfInputHandle.click({ clickCount: 3 });
+          await page.keyboard.press('Backspace');
+          await cpfInputHandle.type(currentCpf, { delay: 100 });
+
           const filledValue = await cpfInputHandle.inputValue();
-          if (filledValue.replace(/\D/g, '') !== currentCpf) {
-            emitLogCb(onLog, 'warn', `Verificação falhou: CPF no input (${filledValue}) não bate com o esperado (${currentCpf}). Tentando novamente.`);
-            await cpfInputHandle.fill('');
-            await cpfInputHandle.fill(currentCpf);
+          const normalizedFilledValue = filledValue.replace(/\D/g, '');
+
+          if (normalizedFilledValue !== currentCpf) {
+            throw new Error(`Verificação falhou: CPF no input (${filledValue}) não bate com o esperado (${currentCpf}).`);
           }
           emitLogCb(onLog,'info', `Preenchido e verificado CPF ${currentCpf}`);
         }catch(e){ throw new Error('Falha ao preencher/verificar CPF: '+(e && e.message)); }
 
-        const beforeClickMs = (options && options.margemDelayBeforeClickMs) || 1000;
+        const beforeClickMs = (options && options.margemDelayBeforeClickMs) || 800;
         await delay(beforeClickMs);
 
         if (consultButtonSelector){
@@ -257,7 +250,8 @@ async function runMargem(payload, onProgress, onLog){
             emitLogCb(onLog,'info', 'Clicado botão de consulta');
           }catch(e){ throw new Error('Falha ao clicar botão de consulta: '+(e && e.message)); }
         } else {
-          try{ await cpfInputHandle.press('Enter'); emitLogCb(onLog,'info','Press Enter no input CPF'); }catch(e){ emitLogCb(onLog,'warn','Não foi possível submeter via Enter: '+(e&&e.message)); }
+          await cpfInputHandle.press('Enter'); 
+          emitLogCb(onLog,'info','Botão de consulta não encontrado, pressionado Enter no input CPF');
         }
 
         const resultSelectors = ['.result', '.saldo', '.consulta-resultado', '.resultado', '.card .body', '.card-body', '.balance', '#saldo'];
