@@ -12,62 +12,39 @@ function emitLogCb(onLog, level, message, meta){
   else console.log(message, meta||'');
 }
 
+// =================================================================
+// FUNÇÃO DE LEITURA DE CSV CORRIGIDA
+// =================================================================
 function readCpfsFromCsv(filePath, onLog) {
     if (!filePath) return [];
-    emitLogCb(onLog, 'info', `Iniciando leitura do arquivo CSV: ${filePath}`);
+    emitLogCb(onLog, 'info', `Iniciando leitura do arquivo: ${filePath}`);
     try {
         const content = fs.readFileSync(filePath, 'utf8');
-        const lines = content.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-        if (lines.length === 0) {
-            emitLogCb(onLog, 'warn', 'Arquivo CSV está vazio ou contém apenas linhas em branco.');
-            return [];
-        }
-
-        const header = lines[0].toLowerCase();
-        const delimiter = header.includes(';') ? ';' : ',';
-        emitLogCb(onLog, 'info', `CSV: Detectado delimitador: '${delimiter}'`);
-        
-        let cpfColumnIndex = -1;
-        let hasHeader = false;
-        const headerColumns = header.split(delimiter).map(h => h.replace(/["']/g, '').trim());
-
-        // Procura pela coluna de CPF no cabeçalho
-        const cpfKeywords = ['cpf', 'documento', 'document'];
-        cpfColumnIndex = headerColumns.findIndex(h => cpfKeywords.some(k => h.includes(k)));
-
-        if (cpfColumnIndex !== -1) {
-            hasHeader = true;
-            emitLogCb(onLog, 'info', `CSV: Cabeçalho encontrado. Usando coluna ${cpfColumnIndex} ('${headerColumns[cpfColumnIndex]}') para os CPFs.`);
-        } else {
-            // Se não encontrou um cabeçalho com keywords, assume que é um arquivo sem cabeçalho e usa a primeira coluna
-            hasHeader = false;
-            cpfColumnIndex = 0;
-            emitLogCb(onLog, 'warn', 'CSV: Cabeçalho com a coluna CPF não identificado. Assumindo que a primeira coluna contém os CPFs.');
-        }
-
+        const lines = content.split(/\\r?\\n/);
         const cpfs = [];
-        const startLine = hasHeader ? 1 : 0;
 
-        for (let i = startLine; i < lines.length; i++) {
-            const columns = lines[i].split(delimiter);
-            const cpfCandidate = (columns[cpfColumnIndex] || '').trim();
-            const digits = cpfCandidate.replace(/\D/g, '');
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const digits = (line || '').replace(/\\D/g, ''); 
+            
             if (digits.length === 11) {
                 cpfs.push(digits);
-            } else if (digits) {
-                emitLogCb(onLog, 'warn', `CSV: Valor ignorado na linha ${i + 1}. CPF inválido: "${cpfCandidate}"`);
             }
         }
         
         const uniqueCpfs = Array.from(new Set(cpfs));
-        emitLogCb(onLog, 'info', `CSV: Leitura finalizada. Encontrados ${uniqueCpfs.length} CPFs únicos.`);
+        if (uniqueCpfs.length > 0) {
+            emitLogCb(onLog, 'info', `Leitura finalizada. Encontrados ${uniqueCpfs.length} CPFs únicos.`);
+        } else {
+            emitLogCb(onLog, 'warn', 'Nenhum CPF válido (número de 11 dígitos) foi encontrado no arquivo.');
+        }
         return uniqueCpfs;
     } catch (e) {
-        emitLogCb(onLog, 'error', `Falha catastrófica ao ler o arquivo CSV: ${e.message}`);
+        emitLogCb(onLog, 'error', `Falha grave ao ler o arquivo CSV: ${e.message}`);
         return [];
     }
 }
-
+// =================================================================
 
 async function navigateToConsulta(page, baseUrl, onLog) {
   const targetUrlPart = '/clt/consultar';
@@ -125,16 +102,14 @@ async function runMargem(payload, onProgress, onLog){
   const { url, email, password, cpf, steps, options, filePath } = payload || {};
   emitLogCb(onLog, 'info', 'Iniciando robô de consulta de margem.');
 
-  // 1. Carrega os CPFs ANTES de qualquer outra coisa
   let cpfs = [];
   if (filePath) {
       cpfs = readCpfsFromCsv(filePath, onLog);
   } else if (cpf) {
-      const singleCpf = (cpf||'').replace(/\D/g,'');
-      if(singleCpf) cpfs = [singleCpf];
+      const singleCpf = (cpf||'').replace(/\\D/g,'');
+      if(singleCpf.length === 11) cpfs = [singleCpf];
   }
 
-  // 2. Valida se existem CPFs para processar
   if (!cpfs || cpfs.length === 0) {
     const errorMsg = 'Nenhum CPF válido foi encontrado para processar. Verifique o CPF individual ou o arquivo CSV fornecido.';
     emitLogCb(onLog, 'error', errorMsg);
@@ -142,10 +117,9 @@ async function runMargem(payload, onProgress, onLog){
         onProgress({ current: 1, total: 1, percent: 100, message: `Erro: ${errorMsg}` });
     }
     emitLogCb(onLog, 'info', 'Finalizando execução por falta de CPFs.');
-    return; // Interrompe a execução aqui.
+    return;
   }
 
-  // 3. Se houver CPFs, prossegue com a automação
   const headless = options && typeof options.headless === 'boolean' ? options.headless : true;
   emitLogCb(onLog, 'info', `Iniciando navegador no modo ${headless ? 'headless' : 'com interface'}. Total de ${cpfs.length} CPFs para processar.`);
   const browser = await chromium.launch({ headless });
@@ -160,7 +134,7 @@ async function runMargem(payload, onProgress, onLog){
       if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
       const ts = new Date().toISOString().replace(/[:.]/g,'-');
       resultsPath = path.join(outDir, `resultado-${ts}.csv`);
-      try{ fs.writeFileSync(resultsPath, 'CPF;OPERAÇÃO;OBS\n', { encoding: 'utf8' }); }catch(e){}
+      try{ fs.writeFileSync(resultsPath, 'CPF;OPERAÇÃO;OBS\\n', { encoding: 'utf8' }); }catch(e){}
       emitLogCb(onLog, 'info', `Arquivo de resultados será salvo em: ${resultsPath}`);
     }
 
@@ -235,7 +209,7 @@ async function runMargem(payload, onProgress, onLog){
         await cpfInputHandle.type(currentCpf, { delay: 100 });
         
         const filledValue = await cpfInputHandle.inputValue();
-        if (filledValue.replace(/\D/g, '') !== currentCpf) {
+        if (filledValue.replace(/\\D/g, '') !== currentCpf) {
           throw new Error(`CPF no input (${filledValue}) não bate com o esperado (${currentCpf}).`);
         }
         emitLogCb(onLog,'info', `Preenchido e verificado CPF ${currentCpf}`);
@@ -263,7 +237,7 @@ async function runMargem(payload, onProgress, onLog){
 
         if (resultText) {
           op = 'Sucesso';
-          obs = resultText.replace(/\r?\n/g,' | ').replace(/;/g,',');
+          obs = resultText.replace(/\\r?\\n/g,' | ').replace(/;/g,',');
           emitLogCb(onLog,'info', `Resultado para ${currentCpf}: ${obs}`);
         } else {
           op = 'Falha';
