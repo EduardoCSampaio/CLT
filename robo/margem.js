@@ -16,49 +16,66 @@ function emitLogCb(onLog, level, message, meta){
 // =================================================================
 // FUNÇÃO DE LEITURA DE CSV PROFISSIONAL (BASEADA NO autorizador.js)
 // =================================================================
+// =================================================================
+// FUNÇÃO DE LEITURA DE CSV COM DIAGNÓSTICO AVANÇADO
+// =================================================================
 function readCpfsFromCsv(filePath, onLog) {
-    return new Promise((resolve, reject) => {
-        if (!filePath) {
-            return resolve([]);
-        }
+  return new Promise((resolve, reject) => {
+      if (!filePath) {
+          emitLogCb(onLog, 'warn', '[DIAGNÓSTICO] O caminho do arquivo CSV não foi fornecido.');
+          return resolve([]);
+      }
 
-        emitLogCb(onLog, 'info', `Iniciando leitura profissional do arquivo CSV: ${filePath}`);
-        const cpfs = [];
+      emitLogCb(onLog, 'info', `[DIAGNÓSTICO] Iniciando leitura do arquivo CSV: ${filePath}`);
+      const cpfs = [];
+      let rowCount = 0;
 
-        fs.createReadStream(filePath)
-            .pipe(csv({ 
-                separator: ';', // Tenta com ponto-e-vírgula primeiro
-                mapHeaders: ({ header }) => header.trim().toLowerCase()
-            }))
-            .on('data', (row) => {
-                const cpfKey = Object.keys(row).find(key => key.includes('cpf') || key.includes('documento'));
-                if (cpfKey && row[cpfKey]) {
-                    const digits = (row[cpfKey] || '').replace(/\\D/g, '');
-                    if (digits.length === 11) {
-                        cpfs.push(digits);
-                    }
-                } else if (row['cpf']) {
-                     const digits = (row['cpf'] || '').replace(/\\D/g, '');
-                     if (digits.length === 11) {
-                        cpfs.push(digits);
-                    }
-                }
-            })
-            .on('end', () => {
-                const uniqueCpfs = Array.from(new Set(cpfs));
-                 if (uniqueCpfs.length > 0) {
-                    emitLogCb(onLog, 'info', `Leitura finalizada. Encontrados ${uniqueCpfs.length} CPFs únicos.`);
-                } else {
-                    emitLogCb(onLog, 'warn', 'Nenhum CPF válido foi encontrado no arquivo.');
-                }
-                resolve(uniqueCpfs);
-            })
-            .on('error', (err) => {
-                emitLogCb(onLog, 'error', `Erro grave ao ler o CSV: ${err.message}`);
-                reject(err);
-            });
-    });
+      fs.createReadStream(filePath)
+          .pipe(csv({ 
+              separator: ';', // Assumindo separador ';'
+              mapHeaders: ({ header }) => header.trim().toLowerCase()
+          }))
+          .on('headers', (headers) => {
+              emitLogCb(onLog, 'info', `[DIAGNÓSTICO] Cabeçalhos detectados: [${headers.join(', ')}]`);
+          })
+          .on('data', (row) => {
+              rowCount++;
+              emitLogCb(onLog, 'info', `[DIAGNÓSTICO] Lendo linha ${rowCount}: ${JSON.stringify(row)}`);
+              
+              const cpfKey = Object.keys(row).find(key => key.includes('cpf') || key.includes('documento'));
+              
+              if (cpfKey && row[cpfKey]) {
+                  const rawValue = row[cpfKey];
+                  emitLogCb(onLog, 'info', `[DIAGNÓSTICO] Encontrada chave '${cpfKey}' com valor '${rawValue}'`);
+                  const digits = (rawValue || '').replace(/\\D/g, '');
+                  if (digits.length === 11) {
+                      cpfs.push(digits);
+                      emitLogCb(onLog, 'info', `[DIAGNÓSTICO] CPF '${digits}' extraído com SUCESSO.`);
+                  } else {
+                      emitLogCb(onLog, 'warn', `[DIAGNÓSTICO] Valor na coluna '${cpfKey}' não tem 11 dígitos.`);
+                  }
+              } else {
+                  emitLogCb(onLog, 'warn', `[DIAGNÓSTICO] Nenhuma coluna com 'cpf' ou 'documento' encontrada na linha ${rowCount}. Colunas presentes: [${Object.keys(row).join(', ')}]`);
+              }
+          })
+          .on('end', () => {
+              emitLogCb(onLog, 'info', `[DIAGNÓSTICO] Fim do arquivo. Total de linhas lidas: ${rowCount}.`);
+              const uniqueCpfs = Array.from(new Set(cpfs));
+               if (uniqueCpfs.length > 0) {
+                  emitLogCb(onLog, 'info', `Leitura finalizada. Encontrados ${uniqueCpfs.length} CPFs únicos.`);
+              } else {
+                  emitLogCb(onLog, 'warn', 'FALHA NA LEITURA: Nenhum CPF foi extraído. Verifique os logs [DIAGNÓSTICO] acima.');
+                  emitLogCb(onLog, 'warn', 'CAUSAS PROVÁVEIS: 1) O separador do CSV não é \';\'. 2) O nome da coluna não é \'cpf\' ou \'documento\'. 3) A coluna de CPF está vazia.');
+              }
+              resolve(uniqueCpfs);
+          })
+          .on('error', (err) => {
+              emitLogCb(onLog, 'error', `[DIAGNÓSTICO] Erro CRÍTICO no parser do CSV: ${err.message}`);
+              reject(err);
+          });
+  });
 }
+
 // =================================================================
 
 async function navigateToConsulta(page, baseUrl, onLog) {
