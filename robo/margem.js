@@ -19,14 +19,14 @@ function emitLogCb(onLog, level, message, meta){
 function readCpfsFromCsv(filePath, onLog) {
     return new Promise((resolve, reject) => {
         const absolutePath = path.resolve(filePath);
-        emitLogCb(onLog, 'info', `[DIAGNÓSTICO] Caminho absoluto do arquivo: ${absolutePath}`);
+        emitLogCb(onLog, 'info', `[DIAGNÓSTICO LEITOR] Caminho absoluto do arquivo: ${absolutePath}`);
 
         if (!fs.existsSync(absolutePath)) {
-            emitLogCb(onLog, 'error', `[DIAGNÓSTICO] FALHA CRÍTICA: O arquivo não existe no caminho fornecido.`);
+            emitLogCb(onLog, 'error', `[DIAGNÓSTICO LEITOR] FALHA CRÍTICA: O arquivo não existe no caminho fornecido.`);
             return resolve([]);
         }
 
-        emitLogCb(onLog, 'info', `[DIAGNÓSTICO] Arquivo encontrado. Iniciando leitura...`);
+        emitLogCb(onLog, 'info', `[DIAGNÓSTICO LEITOR] Arquivo encontrado. Iniciando leitura...`);
         const cpfs = [];
         let rowCount = 0;
 
@@ -36,105 +36,61 @@ function readCpfsFromCsv(filePath, onLog) {
                 mapHeaders: ({ header }) => header.trim().toLowerCase()
             }))
             .on('headers', (headers) => {
-                emitLogCb(onLog, 'info', `[DIAGNÓSTICO] Cabeçalhos detectados: [${headers.join(', ')}]`);
+                emitLogCb(onLog, 'info', `[DIAGNÓSTICO LEITOR] Cabeçalhos detectados: [${headers.join(', ')}]`);
             })
             .on('data', (row) => {
                 rowCount++;
-                emitLogCb(onLog, 'info', `[DIAGNÓSTICO] Lendo linha ${rowCount}: ${JSON.stringify(row)}`);
+                emitLogCb(onLog, 'info', `[DIAGNÓSTICO LEITOR] Lendo linha ${rowCount}: ${JSON.stringify(row)}`);
                 
                 const cpfKey = Object.keys(row).find(key => key.includes('cpf') || key.includes('documento'));
                 
                 if (cpfKey && row[cpfKey]) {
                     const rawValue = row[cpfKey];
-                    emitLogCb(onLog, 'info', `[DIAGNÓSTICO] Encontrada chave '${cpfKey}' com valor '${rawValue}'`);
+                    emitLogCb(onLog, 'info', `[DIAGNÓSTICO LEITOR] Encontrada chave '${cpfKey}' com valor '${rawValue}'`);
                     const digits = (rawValue || '').replace(/\\D/g, '');
                     if (digits.length === 11) {
                         cpfs.push(digits);
-                        emitLogCb(onLog, 'info', `[DIAGNÓSTICO] CPF '${digits}' extraído com SUCESSO.`);
+                        emitLogCb(onLog, 'info', `[DIAGNÓSTICO LEITOR] CPF '${digits}' extraído com SUCESSO.`);
                     } else {
-                        emitLogCb(onLog, 'warn', `[DIAGNÓSTICO] Valor na coluna '${cpfKey}' não tem 11 dígitos.`);
+                        emitLogCb(onLog, 'warn', `[DIAGNÓSTICO LEITOR] Valor na coluna '${cpfKey}' não tem 11 dígitos.`);
                     }
                 } else {
-                    emitLogCb(onLog, 'warn', `[DIAGNÓSTICO] Nenhuma coluna com 'cpf' ou 'documento' encontrada na linha ${rowCount}. Colunas presentes: [${Object.keys(row).join(', ')}]`);
+                    emitLogCb(onLog, 'warn', `[DIAGNÓSTICO LEITOR] Nenhuma coluna com 'cpf' ou 'documento' encontrada na linha ${rowCount}.`);
                 }
             })
             .on('end', () => {
-                emitLogCb(onLog, 'info', `[DIAGNÓSTICO] Fim do arquivo. Total de linhas lidas: ${rowCount}.`);
+                emitLogCb(onLog, 'info', `[DIAGNÓSTICO LEITOR] Fim do arquivo. Total de linhas lidas: ${rowCount}.`);
                 const uniqueCpfs = Array.from(new Set(cpfs));
                  if (uniqueCpfs.length > 0) {
                     emitLogCb(onLog, 'info', `Leitura finalizada. Encontrados ${uniqueCpfs.length} CPFs únicos.`);
                 } else {
-                    emitLogCb(onLog, 'warn', 'FALHA NA LEITURA: Nenhum CPF foi extraído. Verifique os logs [DIAGNÓSTICO] acima.');
+                    emitLogCb(onLog, 'warn', 'FALHA NA LEITURA: Nenhum CPF foi extraído. Verifique os logs [DIAGNÓSTICO LEITOR] acima.');
                 }
                 resolve(uniqueCpfs);
             })
             .on('error', (err) => {
-                emitLogCb(onLog, 'error', `[DIAGNÓSTICO] Erro CRÍTICO no parser do CSV: ${err.message}`);
+                emitLogCb(onLog, 'error', `[DIAGNÓSTICO LEITOR] Erro CRÍTICO no parser do CSV: ${err.message}`);
                 reject(err);
             });
     });
 }
 // =================================================================
 
-async function navigateToConsulta(page, baseUrl, onLog) {
-  const targetUrlPart = '/clt/consultar';
-  const currentUrl = page.url();
-
-  if (currentUrl.includes(targetUrlPart)) {
-    emitLogCb(onLog, 'info', 'Já está na página de consulta, pulando navegação.');
-    await page.waitForLoadState('networkidle', { timeout: 2000 }).catch(() => {});
-    return;
-  }
-  
-  emitLogCb(onLog, 'info', 'Iniciando navegação para a página de Consulta Margem.');
-  let navigated = false;
-
-  try {
-    if (baseUrl) {
-      const direct = new URL(targetUrlPart, baseUrl).href;
-      emitLogCb(onLog, 'info', `Tentando navegação direta para ${direct}`);
-      await page.goto(direct, { timeout: 20000, waitUntil: 'networkidle' });
-      await delay(800);
-      if (page.url().includes(targetUrlPart)) navigated = true;
-    }
-  } catch (e) {
-    emitLogCb(onLog, 'warn', `Falha na navegação direta: ${e.message}`);
-  }
-
-  if (!navigated) {
-    const linkCandidates = [
-      'a[href="/clt/consultar"]', 'a[href*="/clt"]', 'a:has-text("Consulta Margem")',
-      'a:has-text("Consultar Margem")', 'a:has-text("Margem")'
-    ];
-    for (const sel of linkCandidates) {
-      try {
-        const el = await page.$(sel);
-        if (!el) continue;
-        emitLogCb(onLog, 'info', `Tentando clicar link candidato: ${sel}`);
-        await el.click({ timeout: 5000 }).catch(() => {});
-        await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {});
-        if (page.url().includes(targetUrlPart)) {
-          navigated = true;
-          break;
-        }
-      } catch (e) { /* ignore and try next */ }
-    }
-  }
-  
-  if (navigated) {
-    emitLogCb(onLog, 'info', 'Navegação para Consulta Margem concluída.');
-  } else {
-    throw new Error('Falha ao navegar para a página de consulta.');
-  }
-}
-
 async function runMargem(payload, onProgress, onLog){
-  // LÓGICA DO CPF INDIVIDUAL REMOVIDA - AGORA SÓ ACEITA CSV
-  const { url, email, password, options, filePath } = payload || {};
+  // ===================== INÍCIO DA CORREÇÃO DE PAYLOAD =====================
+  emitLogCb(onLog, 'info', `[DIAGNÓSTICO PAYLOAD] Pacote recebido da interface: ${JSON.stringify(payload)}`);
+  
+  const { url, email, password, options } = payload || {};
+  // Lógica flexível para encontrar o caminho do arquivo
+  const filePath = payload.filePath || payload.path || payload.csv || payload.csvPath || payload.file || payload.arquivo;
+  
+  emitLogCb(onLog, 'info', `[DIAGNÓSTICO PAYLOAD] Caminho do arquivo extraído: ${filePath}`);
+  // ===================== FIM DA CORREÇÃO DE PAYLOAD =====================
+  
   emitLogCb(onLog, 'info', 'Iniciando robô de consulta de margem (MODO CSV EXCLUSIVO).');
 
   if (!filePath) {
-      const errorMsg = 'Nenhum arquivo CSV foi fornecido. Este robô opera apenas com arquivos CSV.';
+      const errorMsg = 'Nenhum arquivo CSV foi fornecido (ou a propriedade não foi encontrada no payload). Este robô opera apenas com arquivos CSV.';
       emitLogCb(onLog, 'error', errorMsg);
       if (typeof onProgress === 'function') onProgress({ current: 1, total: 1, percent: 100, message: `Erro: ${errorMsg}` });
       return;
@@ -145,9 +101,7 @@ async function runMargem(payload, onProgress, onLog){
   if (!cpfs || cpfs.length === 0) {
     const errorMsg = 'Nenhum CPF válido foi encontrado para processar no arquivo CSV. Verifique os logs de diagnóstico.';
     emitLogCb(onLog, 'error', errorMsg);
-    if (typeof onProgress === 'function') {
-        onProgress({ current: 1, total: 1, percent: 100, message: `Erro: ${errorMsg}` });
-    }
+    if (typeof onProgress === 'function') onProgress({ current: 1, total: 1, percent: 100, message: `Erro: ${errorMsg}` });
     emitLogCb(onLog, 'info', 'Finalizando execução por falta de CPFs.');
     return;
   }
