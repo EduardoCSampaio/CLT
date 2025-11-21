@@ -12,35 +12,62 @@ function emitLogCb(onLog, level, message, meta){
   else console.log(message, meta||'');
 }
 
-function readCpfsFromCsv(filePath){
-  if (!filePath) return [];
-  try{
-    const content = fs.readFileSync(filePath, 'utf8');
-    const lines = content.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-    if (lines.length === 0) return [];
-
-    const header = lines[0];
-    const delimiter = header.includes(';') ? ';' : (header.includes(',') ? ',' : '\n');
-    const cpfs = [];
-    for (let i=0;i<lines.length;i++){
-      const parts = delimiter === '\n' ? [lines[i]] : lines[i].split(delimiter).map(p=>p.trim());
-      let candidate = parts[0];
-      if (i===0){
-        if (/[A-Za-zÀ-ÖØ-öø-ÿ]/.test(header)){
-          let idx = parts.findIndex(p=>/cpf|documento|document/i.test(p));
-          if (idx === -1) idx = 0;
-          candidate = parts[idx];
-          continue;
+function readCpfsFromCsv(filePath, onLog) {
+    if (!filePath) return [];
+    emitLogCb(onLog, 'info', `Iniciando leitura do arquivo CSV: ${filePath}`);
+    try {
+        const content = fs.readFileSync(filePath, 'utf8');
+        const lines = content.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        if (lines.length === 0) {
+            emitLogCb(onLog, 'warn', 'Arquivo CSV está vazio ou contém apenas linhas em branco.');
+            return [];
         }
-      }
-      const digits = (candidate||'').replace(/\D/g,'');
-      if (digits) cpfs.push(digits);
+
+        const header = lines[0].toLowerCase();
+        const delimiter = header.includes(';') ? ';' : ',';
+        emitLogCb(onLog, 'info', `CSV: Detectado delimitador: '${delimiter}'`);
+        
+        let cpfColumnIndex = -1;
+        let hasHeader = false;
+        const headerColumns = header.split(delimiter).map(h => h.replace(/["']/g, '').trim());
+
+        // Procura pela coluna de CPF no cabeçalho
+        const cpfKeywords = ['cpf', 'documento', 'document'];
+        cpfColumnIndex = headerColumns.findIndex(h => cpfKeywords.some(k => h.includes(k)));
+
+        if (cpfColumnIndex !== -1) {
+            hasHeader = true;
+            emitLogCb(onLog, 'info', `CSV: Cabeçalho encontrado. Usando coluna ${cpfColumnIndex} ('${headerColumns[cpfColumnIndex]}') para os CPFs.`);
+        } else {
+            // Se não encontrou um cabeçalho com keywords, assume que é um arquivo sem cabeçalho e usa a primeira coluna
+            hasHeader = false;
+            cpfColumnIndex = 0;
+            emitLogCb(onLog, 'warn', 'CSV: Cabeçalho com a coluna CPF não identificado. Assumindo que a primeira coluna contém os CPFs.');
+        }
+
+        const cpfs = [];
+        const startLine = hasHeader ? 1 : 0;
+
+        for (let i = startLine; i < lines.length; i++) {
+            const columns = lines[i].split(delimiter);
+            const cpfCandidate = (columns[cpfColumnIndex] || '').trim();
+            const digits = cpfCandidate.replace(/\D/g, '');
+            if (digits.length === 11) {
+                cpfs.push(digits);
+            } else if (digits) {
+                emitLogCb(onLog, 'warn', `CSV: Valor ignorado na linha ${i + 1}. CPF inválido: "${cpfCandidate}"`);
+            }
+        }
+        
+        const uniqueCpfs = Array.from(new Set(cpfs));
+        emitLogCb(onLog, 'info', `CSV: Leitura finalizada. Encontrados ${uniqueCpfs.length} CPFs únicos.`);
+        return uniqueCpfs;
+    } catch (e) {
+        emitLogCb(onLog, 'error', `Falha catastrófica ao ler o arquivo CSV: ${e.message}`);
+        return [];
     }
-    return Array.from(new Set(cpfs));
-  }catch(e){
-    return [];
-  }
 }
+
 
 async function navigateToConsulta(page, baseUrl, onLog) {
   const targetUrlPart = '/clt/consultar';
@@ -101,15 +128,15 @@ async function runMargem(payload, onProgress, onLog){
   // 1. Carrega os CPFs ANTES de qualquer outra coisa
   let cpfs = [];
   if (filePath) {
-      cpfs = readCpfsFromCsv(filePath || '');
-      emitLogCb(onLog, 'info', `Lidos ${cpfs.length} CPFs do arquivo.`);
+      cpfs = readCpfsFromCsv(filePath, onLog);
   } else if (cpf) {
-      cpfs = [ (cpf||'').replace(/\D/g,'') ];
+      const singleCpf = (cpf||'').replace(/\D/g,'');
+      if(singleCpf) cpfs = [singleCpf];
   }
 
   // 2. Valida se existem CPFs para processar
   if (!cpfs || cpfs.length === 0) {
-    const errorMsg = 'Nenhum CPF foi fornecido. Por favor, forneça um CPF individual ou um arquivo CSV para a consulta.';
+    const errorMsg = 'Nenhum CPF válido foi encontrado para processar. Verifique o CPF individual ou o arquivo CSV fornecido.';
     emitLogCb(onLog, 'error', errorMsg);
     if (typeof onProgress === 'function') {
         onProgress({ current: 1, total: 1, percent: 100, message: `Erro: ${errorMsg}` });
@@ -145,7 +172,7 @@ async function runMargem(payload, onProgress, onLog){
       if (email) {
         const selEmail = 'input[type="email"], input[name*=email i], input[id*=email i], input[placeholder*=email i]';
         await page.fill(selEmail, email);
-        emitLogCb(onLog, 'info', `Preenchido e-mail.`);
+        emitLogCb(onLog, 'info', 'Preenchido e-mail.');
       }
     }catch(e){ emitLogCb(onLog,'warn', 'Falha ao preencher email: '+(e && e.message)); }
 
@@ -153,14 +180,14 @@ async function runMargem(payload, onProgress, onLog){
       if (password) {
         const selPass = 'input[type="password"], input[name*=pass i], input[id*=pass i]';
         await page.fill(selPass, password);
-        emitLogCb(onLog, 'info', `Preenchida senha.`);
+        emitLogCb(onLog, 'info', 'Preenchida senha.');
       }
     }catch(e){ emitLogCb(onLog,'warn','Falha ao preencher senha: '+(e && e.message)); }
 
     try{
       const btnSel = 'button[type="submit"], button.button, button:has-text("Fazer login")';
       await page.click(btnSel, { timeout: 5000 });
-      emitLogCb(onLog,'info', `Clicado botão de login.`);
+      emitLogCb(onLog,'info', 'Clicado botão de login.');
       await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(()=>{});
     }catch(e){ emitLogCb(onLog,'warn','Não foi possível clicar botão de login: '+(e && e.message)); }
 
@@ -169,13 +196,12 @@ async function runMargem(payload, onProgress, onLog){
     let consultButtonSelector = 'button:has-text("Consultar saldo")';
     try {
         await page.waitForSelector(consultButtonSelector, { timeout: 5000 });
-        emitLogCb(onLog,'info',`Botão de consulta encontrado: "Consultar saldo"`);
+        emitLogCb(onLog,'info','Botão de consulta encontrado: "Consultar saldo"');
     } catch (e) {
-      emitLogCb(onLog, 'warn', `Botão 'Consultar saldo' não encontrado, o robô tentará pressionar Enter após preencher o CPF.`);
+      emitLogCb(onLog, 'warn', 'Botão "Consultar saldo" não encontrado, o robô tentará pressionar Enter após preencher o CPF.');
       consultButtonSelector = null;
     }
     
-    // ... (Loop de processamento de CPFs)
     for (let i=0;i<cpfs.length;i++) {
       const currentCpf = cpfs[i];
       emitLogCb(onLog,'info', `Processando ${i+1}/${cpfs.length}: ${currentCpf}`);
@@ -247,7 +273,7 @@ async function runMargem(payload, onProgress, onLog){
             const shotName = `screenshot-${currentCpf}-${new Date().toISOString().replace(/[:.]/g,'-')}.png`;
             const shotPath = path.join(path.dirname(resultsPath), shotName);
             await page.screenshot({ path: shotPath, fullPage: false });
-            obs += `; screenshot=${shotName}`;
+            obs += '; screenshot=' + shotName;
           }
         }
       }catch(e){
