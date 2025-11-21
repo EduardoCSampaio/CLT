@@ -11,39 +11,56 @@ function emitLogCb(onLog, level, message, meta){
   else if(level==='warn') console.warn(message, meta||'');
   else console.log(message, meta||'');
 }
-
 // =================================================================
 // FUNÇÃO DE LEITURA DE CSV CORRIGIDA
 // =================================================================
-function readCpfsFromCsv(filePath, onLog) {
-    if (!filePath) return [];
-    emitLogCb(onLog, 'info', `Iniciando leitura do arquivo: ${filePath}`);
-    try {
-        const content = fs.readFileSync(filePath, 'utf8');
-        const lines = content.split(/\\r?\\n/);
+const csv = require('csv-parser');
+
+// LINHA CORRETA (COM O 'await')
+cpfs = await readCpfsFromCsv(filePath, onLog);
+    return new Promise((resolve, reject) => {
+        if (!filePath) {
+            return resolve([]);
+        }
+
+        emitLogCb(onLog, 'info', `Iniciando leitura PROFISSIONAL do arquivo CSV: ${filePath}`);
         const cpfs = [];
 
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const digits = (line || '').replace(/\\D/g, ''); 
-            
-            if (digits.length === 11) {
-                cpfs.push(digits);
-            }
-        }
-        
-        const uniqueCpfs = Array.from(new Set(cpfs));
-        if (uniqueCpfs.length > 0) {
-            emitLogCb(onLog, 'info', `Leitura finalizada. Encontrados ${uniqueCpfs.length} CPFs únicos.`);
-        } else {
-            emitLogCb(onLog, 'warn', 'Nenhum CPF válido (número de 11 dígitos) foi encontrado no arquivo.');
-        }
-        return uniqueCpfs;
-    } catch (e) {
-        emitLogCb(onLog, 'error', `Falha grave ao ler o arquivo CSV: ${e.message}`);
-        return [];
-    }
-}
+        fs.createReadStream(filePath)
+            .pipe(csv({ 
+                separator: ';', // Tenta com ponto-e-vírgula primeiro
+                mapHeaders: ({ header }) => header.trim().toLowerCase() // Padroniza o cabeçalho
+            }))
+            .on('data', (row) => {
+                // Procura por 'cpf' ou 'documento' no cabeçalho
+                const cpfKey = Object.keys(row).find(key => key.includes('cpf') || key.includes('documento'));
+                if (cpfKey && row[cpfKey]) {
+                    const digits = (row[cpfKey] || '').replace(/\\D/g, '');
+                    if (digits.length === 11) {
+                        cpfs.push(digits);
+                    }
+                // Se não achar cabeçalho, pega a primeira coluna
+                } else if (row['cpf']) { // O parser pode nomear como 'cpf' por padrão
+                     const digits = (row['cpf'] || '').replace(/\\D/g, '');
+                     if (digits.length === 11) {
+                        cpfs.push(digits);
+                    }
+                }
+            })
+            .on('end', () => {
+                const uniqueCpfs = Array.from(new Set(cpfs));
+                 if (uniqueCpfs.length > 0) {
+                    emitLogCb(onLog, 'info', `Leitura finalizada. Encontrados ${uniqueCpfs.length} CPFs únicos.`);
+                } else {
+                    emitLogCb(onLog, 'warn', 'Nenhum CPF válido foi encontrado no arquivo usando o leitor profissional.');
+                }
+                resolve(uniqueCpfs);
+            })
+            .on('error', (err) => {
+                emitLogCb(onLog, 'error', `Erro grave ao ler o CSV: ${err.message}`);
+                reject(err);
+            });
+    });
 // =================================================================
 
 async function navigateToConsulta(page, baseUrl, onLog) {
