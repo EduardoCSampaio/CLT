@@ -94,43 +94,58 @@ async function navigateToConsulta(page, baseUrl, onLog) {
   }
 }
 
-
 async function runMargem(payload, onProgress, onLog){
   const { url, email, password, cpf, steps, options, filePath } = payload || {};
-  const headless = options && typeof options.headless === 'boolean' ? options.headless : true;
+  emitLogCb(onLog, 'info', 'Iniciando robô de consulta de margem.');
 
-  emitLogCb(onLog, 'info', `Iniciando margem — url=${url} headless=${headless}`);
+  // 1. Carrega os CPFs ANTES de qualquer outra coisa
+  let cpfs = [];
+  if (filePath) {
+      cpfs = readCpfsFromCsv(filePath || '');
+      emitLogCb(onLog, 'info', `Lidos ${cpfs.length} CPFs do arquivo.`);
+  } else if (cpf) {
+      cpfs = [ (cpf||'').replace(/\D/g,'') ];
+  }
+
+  // 2. Valida se existem CPFs para processar
+  if (!cpfs || cpfs.length === 0) {
+    const errorMsg = 'Nenhum CPF foi fornecido. Por favor, forneça um CPF individual ou um arquivo CSV para a consulta.';
+    emitLogCb(onLog, 'error', errorMsg);
+    if (typeof onProgress === 'function') {
+        onProgress({ current: 1, total: 1, percent: 100, message: `Erro: ${errorMsg}` });
+    }
+    emitLogCb(onLog, 'info', 'Finalizando execução por falta de CPFs.');
+    return; // Interrompe a execução aqui.
+  }
+
+  // 3. Se houver CPFs, prossegue com a automação
+  const headless = options && typeof options.headless === 'boolean' ? options.headless : true;
+  emitLogCb(onLog, 'info', `Iniciando navegador no modo ${headless ? 'headless' : 'com interface'}. Total de ${cpfs.length} CPFs para processar.`);
   const browser = await chromium.launch({ headless });
+  
+  let resultsPath = null;
   const context = await browser.newContext();
   const page = await context.newPage();
 
-  let resultsPath = null;
-  let cpfs = [];
-  if (filePath) {
-    cpfs = readCpfsFromCsv(filePath || '');
-    const outDir = path.join(process.cwd(), 'Relatórios Margem');
-    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-    const ts = new Date().toISOString().replace(/[:.]/g,'-');
-    resultsPath = path.join(outDir, `resultado-${ts}.csv`);
-    try{ fs.writeFileSync(resultsPath, 'CPF;OPERAÇÃO;OBS\n', { encoding: 'utf8' }); }catch(e){}
-    emitLogCb(onLog, 'info', `Batch detectado: ${cpfs.length} CPFs lidos. Resultado em: ${resultsPath}`);
-  } else if (cpf) {
-    cpfs = [ (cpf||'').replace(/\D/g,'') ];
-  } else {
-    cpfs = [];
-    emitLogCb(onLog,'info','Nenhum CPF ou arquivo CSV fornecido — executando fluxo sem CPFs.');
-  }
-
   try {
+    if (filePath) {
+      const outDir = path.join(process.cwd(), 'Relatórios Margem');
+      if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+      const ts = new Date().toISOString().replace(/[:.]/g,'-');
+      resultsPath = path.join(outDir, `resultado-${ts}.csv`);
+      try{ fs.writeFileSync(resultsPath, 'CPF;OPERAÇÃO;OBS\n', { encoding: 'utf8' }); }catch(e){}
+      emitLogCb(onLog, 'info', `Arquivo de resultados será salvo em: ${resultsPath}`);
+    }
+
     emitLogCb(onLog, 'info', `Navegando para ${url}`);
     await page.goto(url, { timeout: 30000 });
-    emitLogCb(onLog, 'info', `Página carregada`);
+    emitLogCb(onLog, 'info', 'Página carregada');
 
     try{
       if (email) {
         const selEmail = 'input[type="email"], input[name*=email i], input[id*=email i], input[placeholder*=email i]';
         await page.fill(selEmail, email);
-        emitLogCb(onLog, 'info', `Preenchido e-mail via selector ${selEmail}`);
+        emitLogCb(onLog, 'info', `Preenchido e-mail.`);
       }
     }catch(e){ emitLogCb(onLog,'warn', 'Falha ao preencher email: '+(e && e.message)); }
 
@@ -138,61 +153,30 @@ async function runMargem(payload, onProgress, onLog){
       if (password) {
         const selPass = 'input[type="password"], input[name*=pass i], input[id*=pass i]';
         await page.fill(selPass, password);
-        emitLogCb(onLog, 'info', `Preenchida senha via selector ${selPass}`);
+        emitLogCb(onLog, 'info', `Preenchida senha.`);
       }
     }catch(e){ emitLogCb(onLog,'warn','Falha ao preencher senha: '+(e && e.message)); }
 
     try{
       const btnSel = 'button[type="submit"], button.button, button:has-text("Fazer login")';
       await page.click(btnSel, { timeout: 5000 });
-      emitLogCb(onLog,'info', `Clicado botão de login (${btnSel})`);
+      emitLogCb(onLog,'info', `Clicado botão de login.`);
       await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(()=>{});
     }catch(e){ emitLogCb(onLog,'warn','Não foi possível clicar botão de login: '+(e && e.message)); }
 
     await navigateToConsulta(page, url, onLog);
     
-    let consultButtonSelector = 'button:has-text("Consultar saldo")'; // From user feedback
+    let consultButtonSelector = 'button:has-text("Consultar saldo")';
     try {
-        const btn = await page.waitForSelector(consultButtonSelector, { timeout: 5000 });
-        if (btn) {
-            emitLogCb(onLog,'info',`Botão de consulta encontrado via ${consultButtonSelector}`);
-        } else {
-            throw new Error('Botão de consulta não encontrado');
-        }
+        await page.waitForSelector(consultButtonSelector, { timeout: 5000 });
+        emitLogCb(onLog,'info',`Botão de consulta encontrado: "Consultar saldo"`);
     } catch (e) {
-      emitLogCb(onLog, 'warn', `Botão 'Consultar saldo' não encontrado: ${e && e.message}`);
+      emitLogCb(onLog, 'warn', `Botão 'Consultar saldo' não encontrado, o robô tentará pressionar Enter após preencher o CPF.`);
       consultButtonSelector = null;
     }
-
-    if (steps && steps.trim()){
-      const lines = steps.split('\n').map(l=>l.trim()).filter(Boolean);
-      for (let i=0;i<lines.length;i++){
-        const line = lines[i];
-        emitLogCb(onLog,'info', `Executando passo ${i+1}: ${line}`);
-        const parts = line.split(':');
-        const action = parts[0];
-        const selector = parts[1];
-        const rest = parts.slice(2).join(':');
-        try{
-          if (action === 'click'){
-            await page.click(selector, { timeout: 10000 });
-            await delay(500);
-          } else if (action === 'wait'){
-            await page.waitForSelector(selector, { timeout: 15000 });
-          } else if (action === 'fill'){
-            const value = rest === '$CPF' ? (cpf || '') : rest;
-            await page.fill(selector, value);
-            await delay(300);
-          } else if (action === 'press'){
-            await page.press(selector, rest || 'Enter');
-          } else {
-            emitLogCb(onLog,'warn', `Ação desconhecida: ${action}`);
-          }
-        }catch(e){ emitLogCb(onLog,'warn', `Erro no passo ${i+1}: ${e && e.message}`, { line }); }
-      }
-    }
-
-    for (let i=0;i<cpfs.length;i++){
+    
+    // ... (Loop de processamento de CPFs)
+    for (let i=0;i<cpfs.length;i++) {
       const currentCpf = cpfs[i];
       emitLogCb(onLog,'info', `Processando ${i+1}/${cpfs.length}: ${currentCpf}`);
       let op = 'Falha';
@@ -200,20 +184,16 @@ async function runMargem(payload, onProgress, onLog){
       try{
         await navigateToConsulta(page, url, onLog);
         
-        let cpfInputHandle = null;
-        emitLogCb(onLog, 'info', 'Tentando localizar input de CPF...');
         const cpfCandidateSelectors = [
-          'div.control.document-input input[type="tel"]', // Specific from user feedback
-          'input[placeholder="000.000.000-00"]', // Specific from user feedback
+          'div.control.document-input input[type="tel"]', 'input[placeholder="000.000.000-00"]',
           `xpath=//label[contains(translate(., 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'), 'CPF')]/following::input[1]`,
-          'input[name*=cpf i]', 
-          'input[id*=cpf i]', 
-          'input[type="tel"]',
+          'input[name*=cpf i]', 'input[id*=cpf i]', 'input[type="tel"]',
         ];
-
+        
+        let cpfInputHandle = null;
         for (const s of cpfCandidateSelectors) {
           try {
-            const el = await page.waitForSelector(s, { timeout: 2000 });
+            const el = await page.waitForSelector(s, { timeout: 200 });
             if (el) {
               cpfInputHandle = el;
               emitLogCb(onLog, 'info', `Encontrado input CPF via selector: ${s}`);
@@ -222,50 +202,38 @@ async function runMargem(payload, onProgress, onLog){
           } catch (e) {}
         }
 
-        if (!cpfInputHandle){
-          throw new Error('Input de CPF não encontrado na página nesta iteração');
+        if (!cpfInputHandle){ throw new Error('Input de CPF não encontrado na página.'); }
+
+        await cpfInputHandle.click({ clickCount: 3 });
+        await page.keyboard.press('Backspace');
+        await cpfInputHandle.type(currentCpf, { delay: 100 });
+        
+        const filledValue = await cpfInputHandle.inputValue();
+        if (filledValue.replace(/\D/g, '') !== currentCpf) {
+          throw new Error(`CPF no input (${filledValue}) não bate com o esperado (${currentCpf}).`);
         }
-
-        try{
-          emitLogCb(onLog, 'info', `Tentando preencher CPF ${currentCpf}`);
-          await cpfInputHandle.click({ clickCount: 3 });
-          await page.keyboard.press('Backspace');
-          await cpfInputHandle.type(currentCpf, { delay: 100 });
-
-          const filledValue = await cpfInputHandle.inputValue();
-          const normalizedFilledValue = filledValue.replace(/\D/g, '');
-
-          if (normalizedFilledValue !== currentCpf) {
-            throw new Error(`Verificação falhou: CPF no input (${filledValue}) não bate com o esperado (${currentCpf}).`);
-          }
-          emitLogCb(onLog,'info', `Preenchido e verificado CPF ${currentCpf}`);
-        }catch(e){ throw new Error('Falha ao preencher/verificar CPF: '+(e && e.message)); }
-
-        const beforeClickMs = (options && options.margemDelayBeforeClickMs) || 800;
-        await delay(beforeClickMs);
+        emitLogCb(onLog,'info', `Preenchido e verificado CPF ${currentCpf}`);
+        
+        await delay((options && options.margemDelayBeforeClickMs) || 800);
 
         if (consultButtonSelector){
-          try{
-            await page.click(consultButtonSelector);
-            emitLogCb(onLog,'info', 'Clicado botão de consulta');
-          }catch(e){ throw new Error('Falha ao clicar botão de consulta: '+(e && e.message)); }
+          await page.click(consultButtonSelector);
+          emitLogCb(onLog,'info', 'Clicado botão de consulta');
         } else {
           await cpfInputHandle.press('Enter'); 
-          emitLogCb(onLog,'info','Botão de consulta não encontrado, pressionado Enter no input CPF');
+          emitLogCb(onLog,'info','Pressionado Enter no input CPF para submeter.');
         }
 
         const resultSelectors = ['.result', '.saldo', '.consulta-resultado', '.resultado', '.card .body', '.card-body', '.balance', '#saldo'];
         const combinedSelector = resultSelectors.join(',');
         const resultTimeout = (options && options.margemResultTimeoutMs) || 6000;
         await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(()=>{});
+        
         let resultText = '';
         try{
-          await page.waitForSelector(combinedSelector, { timeout: resultTimeout });
-          const el = await page.$(combinedSelector);
+          const el = await page.waitForSelector(combinedSelector, { timeout: resultTimeout });
           if (el) resultText = (await el.innerText()).trim();
-        }catch(e){
-          // not found within timeout
-        }
+        }catch(e){/* not found */}
 
         if (resultText) {
           op = 'Sucesso';
@@ -274,20 +242,17 @@ async function runMargem(payload, onProgress, onLog){
         } else {
           op = 'Falha';
           obs = 'Sem resultado detectado dentro do tempo limite';
-          emitLogCb(onLog,'warn', `Sem resultado detectado para ${currentCpf} (timeout ${resultTimeout}ms)`);
-          try{
-            if (resultsPath){
-              const shotName = `screenshot-${currentCpf}-${new Date().toISOString().replace(/[:.]/g,'-')}.png`;
-              const shotPath = path.join(path.dirname(resultsPath), shotName);
-              await page.screenshot({ path: shotPath, fullPage: false });
-              emitLogCb(onLog,'info', `Screenshot salvo em: ${shotPath}`);
-              obs += `; screenshot=${shotName}`;
-            }
-          }catch(e){ emitLogCb(onLog,'warn','Falha ao salvar screenshot: '+(e&&e.message)); }
+          emitLogCb(onLog,'warn', `Sem resultado para ${currentCpf} (timeout ${resultTimeout}ms)`);
+          if (resultsPath){
+            const shotName = `screenshot-${currentCpf}-${new Date().toISOString().replace(/[:.]/g,'-')}.png`;
+            const shotPath = path.join(path.dirname(resultsPath), shotName);
+            await page.screenshot({ path: shotPath, fullPage: false });
+            obs += `; screenshot=${shotName}`;
+          }
         }
       }catch(e){
         op = 'Falha';
-        obs = (e && e.message) || '';
+        obs = (e && e.message) || 'Erro desconhecido';
         emitLogCb(onLog,'warn', `Erro processando ${currentCpf}: ${obs}`);
       }
 
