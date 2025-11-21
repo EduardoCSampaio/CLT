@@ -59,8 +59,7 @@ async function navigateToConsulta(page, baseUrl, onLog) {
     if (baseUrl) {
       const direct = new URL(targetUrlPart, baseUrl).href;
       emitLogCb(onLog, 'info', `Tentando navegação direta para ${direct}`);
-      await page.goto(direct, { timeout: 20000 });
-      await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+      await page.goto(direct, { timeout: 20000, waitUntil: 'networkidle' });
       await delay(800);
       if (page.url().includes(targetUrlPart)) navigated = true;
     }
@@ -124,8 +123,8 @@ async function runMargem(payload, onProgress, onLog){
 
   try {
     emitLogCb(onLog, 'info', `Navegando para ${url}`);
-    const resp = await page.goto(url, { timeout: 30000 });
-    emitLogCb(onLog, 'info', `Página carregada, status=${resp && resp.status ? resp.status() : 'unknown'}`);
+    await page.goto(url, { timeout: 30000 });
+    emitLogCb(onLog, 'info', `Página carregada`);
 
     try{
       if (email) {
@@ -150,6 +149,8 @@ async function runMargem(payload, onProgress, onLog){
       await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(()=>{});
     }catch(e){ emitLogCb(onLog,'warn','Não foi possível clicar botão de login: '+(e && e.message)); }
 
+    await navigateToConsulta(page, url, onLog);
+    
     let consultButtonSelector = null;
     try {
       const btnSelectors = [
@@ -297,7 +298,7 @@ async function runMargem(payload, onProgress, onLog){
       }
 
       try{
-        const line = `${currentCpf};${op};"${(obs||'').replace(/"/g,'""')}"\n`;
+        const line = `${currentCpf};${op};"${(obs || '').replace(/"/g, '""')}"\n`;
         if (resultsPath) fs.appendFileSync(resultsPath, line, { encoding: 'utf8' });
       }catch(e){ emitLogCb(onLog,'warn','Falha ao gravar resultado: '+(e&&e.message)); }
 
