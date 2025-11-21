@@ -140,7 +140,8 @@ async function runMargem(payload, onProgress, onLog){
     if (password) await page.fill('input[type="password"], input[name*=pass i]', password);
     
     await page.click('button[type="submit"], button:has-text("Fazer login")');
-    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(()=>{});
+    // TIMING OTIMIZADO: Reduzido de 15s para 10s
+    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(()=>{});
 
     await navigateToConsulta(page, url, onLog);
     
@@ -153,42 +154,35 @@ async function runMargem(payload, onProgress, onLog){
       try {
         await navigateToConsulta(page, url, onLog);
         
-        emitLogCb(onLog, 'info', 'Procurando pelo campo CPF com o seletor exato e com paciência...');
+        emitLogCb(onLog, 'info', 'Procurando campo CPF...');
         const cpfSelector = 'input[placeholder="000.000.000-00"]';
         const cpfInputHandle = await page.waitForSelector(cpfSelector, { state: 'visible', timeout: 10000 });
-
-        if (!cpfInputHandle) throw new Error('Timeout: Campo CPF não encontrado na página após 10 segundos.');
-
-        emitLogCb(onLog, 'info', 'Campo CPF encontrado! Preenchendo...');
-        await cpfInputHandle.click({ clickCount: 3 });
-        await cpfInputHandle.press('Backspace');
         await cpfInputHandle.fill(currentCpf);
         emitLogCb(onLog, 'info', `CPF ${currentCpf} inserido.`);
 
         // ============================================================================================
-        // ATENÇÃO: Se o campo "Vínculo empregatício" for obrigatório, o código abaixo precisa ser ativado.
-        // Por favor, me informe o que deve ser inserido neste campo.
-        // Exemplo:
-        // const vinculoInput = await page.waitForSelector('input[placeholder="Vínculo empregatício"]', { state: 'visible' });
-        // await vinculoInput.fill("VALOR_A_SER_INSERIDO");
-        // emitLogCb(onLog, 'info', 'Campo Vínculo empregatício preenchido.');
+        // ATENÇÃO: AINDA PRECISAMOS RESOLVER O "VÍNCULO EMPREGATÍCIO"
+        // Se este campo for obrigatório, o robô vai falhar aqui. Me diga o que fazer.
         // ============================================================================================
         
-        emitLogCb(onLog, 'info', 'Procurando e clicando no botão de consulta...');
+        emitLogCb(onLog, 'info', 'Clicando no botão de consulta...');
         const buttonSelector = 'button:has-text("Consultar saldo")';
-        const button = await page.waitForSelector(buttonSelector, { state: 'visible', timeout: 5000 });
+        await page.click(buttonSelector);
         
-        await button.click();
-        emitLogCb(onLog, 'info', `Botão "${buttonSelector}" clicado com sucesso.`);
+        emitLogCb(onLog, 'info', 'Aguardando resultado aparecer no histórico de consultas...');
+        const resultSelector = `xpath=//tr[contains(., '${currentCpf}')]//td[contains(@class, 'table-status')]//span`;
+        // TIMING OTIMIZADO: Reduzido de 20s para 10s
+        const resultEl = await page.waitForSelector(resultSelector, { timeout: 10000 });
         
-        emitLogCb(onLog, 'info', 'Aguardando resultado...');
-        await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-        const resultEl = await page.waitForSelector('.result, .saldo, .resultado, #resultado, .card-body, .balance', { timeout: 10000 });
-        
-        const resultText = await resultEl.innerText();
-        op = 'Sucesso';
-        obs = resultText.replace(/\\r?\\n/g, ' | ').replace(/;/g, ',');
-        emitLogCb(onLog, 'info', `Resultado para ${currentCpf}: ${obs}`);
+        const resultText = (await resultEl.innerText()).trim();
+        obs = resultText;
+
+        if (obs.toLowerCase().includes('sucesso')) {
+            op = 'Sucesso';
+        } else {
+            op = 'Falha';
+        }
+        emitLogCb(onLog, 'info', `Resultado para ${currentCpf}: ${op} - ${obs}`);
 
       } catch (e) {
           obs = e.message || 'Erro desconhecido durante a consulta.';
@@ -212,6 +206,8 @@ async function runMargem(payload, onProgress, onLog){
         const percent = Math.round(((i+1)/cpfs.length)*100);
         onProgress({ current: i+1, total: cpfs.length, percent, message: `Processado ${i+1}/${cpfs.length}` });
       }
+      // TIMING OTIMIZADO: Delay reduzido de 1000ms para 250ms
+      await delay(250); 
     }
   } catch (err) {
     emitLogCb(onLog, 'error', 'Erro catastrófico durante execução: '+(err && err.message), { stack: err && err.stack });
@@ -220,6 +216,8 @@ async function runMargem(payload, onProgress, onLog){
     emitLogCb(onLog,'info','Finalizando execução da margem');
   }
 }
+
+
 
 
 
