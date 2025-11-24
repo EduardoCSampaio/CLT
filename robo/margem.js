@@ -110,25 +110,31 @@ async function runMargem(payload, onProgress, onLog){
         
         emitLogCb(onLog, 'info', 'Aguardando resultado...');
         
-        // Aguarda a resposta da consulta
-        await page.waitForLoadState('networkidle', { timeout: 10000 });
+        try {
+            // Aguarda pelo campo de resultado (sucesso) aparecer
+            const saldoInput = await page.waitForSelector('input.v-money.input[disabled]', { state: 'visible', timeout: 15000 });
+            const saldo = await saldoInput.inputValue();
 
-        // Tenta pegar o valor da margem
-        const saldo = await page.$eval('input.v-money.input[disabled]', input => input.value).catch(() => null);
+            if (saldo) {
+                status = 'Sucesso';
+                valor = `Valor da Margem: ${saldo}`;
+            } else {
+                status = 'Falha';
+                valor = 'Falha ao consultar (CPF pode não ter o tempo mínimo ou vinculo empregaticio)';
+            }
+            emitLogCb(onLog, 'info', `Resultado para ${currentCpf}: ${status} - ${valor}`);
 
-        if (saldo !== null) {
-            status = 'Sucesso';
-            valor = `Valor da Margem: ${saldo}`;
-        } else {
+        } catch (e) {
+            // Se o campo de sucesso não aparecer no tempo esperado, considera falha.
             status = 'Falha';
             valor = 'Falha ao consultar (CPF pode não ter o tempo mínimo ou vinculo empregaticio)';
+            emitLogCb(onLog, 'warn', `Não foi possível obter a margem para o CPF ${currentCpf}. Provável falha na consulta.`);
         }
-        emitLogCb(onLog, 'info', `Resultado para ${currentCpf}: ${status} - ${valor}`);
 
       } catch (e) {
           status = 'Falha';
           valor = 'Falha ao consultar (CPF pode não ter o tempo mínimo ou vinculo empregaticio)';
-          emitLogCb(onLog, 'error', `Falha ao processar CPF ${currentCpf}: ${e.message}`);
+          emitLogCb(onLog, 'error', `Erro inesperado ao processar CPF ${currentCpf}: ${e.message}`);
       }
       
       const line = `${currentCpf};${status};"${(valor || '').replace(/"/g, '""')}"\n`;
@@ -138,7 +144,7 @@ async function runMargem(payload, onProgress, onLog){
         const percent = Math.round(((i+1)/cpfs.length)*100);
         onProgress({ current: i+1, total: cpfs.length, percent, message: `Processado ${i+1}/${cpfs.length}` });
       }
-      await delay(250); 
+      await delay(500); // Aumentando o delay para 500ms
     }
   } catch (err) {
     emitLogCb(onLog, 'error', 'Erro catastrófico durante execução: '+(err && err.message), { stack: err && err.stack });
