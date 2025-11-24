@@ -13,7 +13,6 @@ function createWindow() {
     },
   });
 
-  // Remove barra de menu para visual mais profissional
   win.setMenuBarVisibility(false);
   win.removeMenu();
 
@@ -28,31 +27,22 @@ app.whenReady().then(() => {
   });
 });
 
-// Abrir telas
 ipcMain.on("open-page", (event, page) => {
   const win = BrowserWindow.getFocusedWindow();
   if (!win) return;
 
   if (page === "autorizador") {
     win.loadFile(path.join(__dirname, "renderer", "autorizador.html"));
-  }
-
-  if (page === "margem") {
+  } else if (page === "margem") {
     win.loadFile(path.join(__dirname, "renderer", "margem.html"));
-  }
-
-  if (page === "index") {
+  } else if (page === "index") {
     win.loadFile(path.join(__dirname, "renderer", "index.html"));
   }
 });
 
-// Iniciar automação
 ipcMain.on("start-automation", async (event, payload) => {
-  // payload can be a string (legacy) or an object { filePath, options }
   const filePath = typeof payload === "string" ? payload : payload && payload.filePath;
   const options = payload && payload.options ? payload.options : {};
-
-  console.log("📄 Arquivo recebido:", filePath, "opções:", options);
 
   if (!filePath || typeof filePath !== "string") {
     return event.reply("automation-finished", "Erro: Nenhum arquivo recebido.");
@@ -60,63 +50,57 @@ ipcMain.on("start-automation", async (event, payload) => {
 
   try {
     const runAutorizador = require("./robo/autorizador.js");
-
-    const progressCallback = (progress) => {
-      event.reply("automation-progress", progress);
-    };
-
-    const logCallback = (log) => {
-      // forward any detailed logs to the renderer
-      event.reply("automation-log", log);
-    };
+    const progressCallback = (progress) => event.reply("automation-progress", progress);
+    const logCallback = (log) => event.reply("automation-log", log);
 
     await runAutorizador(filePath, progressCallback, options, logCallback);
 
     event.reply("automation-finished", "Automação concluída com sucesso!");
   } catch (error) {
-    console.error("❌ Erro na automação:", error);
     event.reply("automation-log", { level: "error", message: "Erro na automação: " + (error && error.message), error: String(error && error.stack) });
     event.reply("automation-finished", "Erro ao executar a automação.");
   }
 });
 
 ipcMain.on("start-margem", async (event, payload) => {
-  // A correção é simplesmente passar o payload ORIGINAL e COMPLETO para o robô.
-  // O robo/margem.js já está preparado para encontrar o filePath dentro dele.
-  
-  event.reply("automation-log", { level: "info", message: `Payload recebido e encaminhado para o robô: ${JSON.stringify(payload)}` });
+  // **THE FIX IS HERE**
+  // Get the correct, writable path for reports and add it to the payload.
+  const reportsPath = path.join(app.getPath('userData'), 'relatorios');
+  // Ensure the directory exists before starting the robot.
+  if (!fs.existsSync(reportsPath)) {
+      fs.mkdirSync(reportsPath, { recursive: true });
+  }
+
+  // Add the path to the payload for the robot to use.
+  const newPayload = { ...payload, reportsPath };
+
+  event.reply("automation-log", { level: "info", message: `Payload final enviado para o robô: ${JSON.stringify(newPayload)}` });
 
   try {
     const runMargem = require("./robo/margem.js");
-
     const progressCb = (progress) => event.reply("automation-progress", progress);
     const logCb = (log) => event.reply("automation-log", log);
 
-    // Agora, o payload completo é passado, incluindo o precioso filePath.
-    await runMargem(payload, progressCb, logCb);
+    // Pass the MODIFIED payload with the correct path.
+    await runMargem(newPayload, progressCb, logCb);
 
     event.reply("automation-finished", "Consulta de margem concluída com sucesso!");
   } catch (err) {
-    console.error("Erro na margem:", err);
     event.reply("automation-log", { level: "error", message: "Erro na margem: " + (err && err.message), error: String(err && err.stack) });
     event.reply("automation-finished", "Erro ao executar consulta de margem.");
   }
 });
 
-// Open CSV reports folder
 ipcMain.on("open-csv-folder", (event) => {
-    const reportsPath = path.join(app.getAppPath(), 'relatorios');
+    const reportsPath = path.join(app.getPath('userData'), 'relatorios');
 
-    // Check if directory exists, if not, create it.
     if (!fs.existsSync(reportsPath)) {
         fs.mkdirSync(reportsPath, { recursive: true });
     }
 
-    // Open a file and show it in the file manager.
     shell.openPath(reportsPath);
 });
 
-// Fechar app
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
