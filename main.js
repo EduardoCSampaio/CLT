@@ -1,5 +1,6 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const path = require("path");
+const fs = require('fs');
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -100,6 +101,19 @@ ipcMain.on("start-margem", async (event, payload) => {
     event.reply("automation-log", { level: "error", message: "Erro na margem: " + (err && err.message), error: String(err && err.stack) });
     event.reply("automation-finished", "Erro ao executar consulta de margem.");
   }
+});
+
+// Open CSV reports folder
+ipcMain.on("open-csv-folder", (event) => {
+    const reportsPath = path.join(app.getAppPath(), 'relatorios');
+
+    // Check if directory exists, if not, create it.
+    if (!fs.existsSync(reportsPath)) {
+        fs.mkdirSync(reportsPath, { recursive: true });
+    }
+
+    // Open a file and show it in the file manager.
+    shell.openPath(reportsPath);
 });
 
 // Fechar app

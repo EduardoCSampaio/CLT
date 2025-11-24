@@ -18,5 +18,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("automation-log", (event, data) => callback(data)),
 
   openPage: (page) =>
-    ipcRenderer.send("open-page", page)
+    ipcRenderer.send("open-page", page),
+
+  openCsvFolder: () => 
+    ipcRenderer.send("open-csv-folder"),
 });

@@ -15,6 +15,7 @@ const margemEmail = document.getElementById("margemEmail");
 const margemPassword = document.getElementById("margemPassword");
 const margemHeadless = document.getElementById("margemHeadless");
 const margemFile = document.getElementById("margemFile");
+const btnOpenCsvFolder = document.getElementById("btn-open-csv-folder");
 
 // Navigation from index -> autorizador
 if (btnAutorizador && window.electronAPI && typeof window.electronAPI.openPage === "function") {
@@ -27,6 +28,12 @@ if (btnMargem && window.electronAPI && typeof window.electronAPI.openPage === "f
   btnMargem.addEventListener("click", () => {
     window.electronAPI.openPage("margem");
   });
+}
+
+if (btnOpenCsvFolder && window.electronAPI && typeof window.electronAPI.openCsvFolder === "function") {
+    btnOpenCsvFolder.addEventListener("click", () => {
+        window.electronAPI.openCsvFolder();
+    });
 }
 
 // Start automation (only present on autorizador.html)
