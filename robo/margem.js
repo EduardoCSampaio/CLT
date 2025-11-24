@@ -43,13 +43,6 @@ async function navigateToConsulta(page, baseUrl, onLog) {
     await page.goto(new URL(targetUrlPart, baseUrl).href, { timeout: 20000, waitUntil: 'networkidle' });
 }
 
-// FUNÇÃO UTILITÁRIA PARA FORMATAR O CPF
-function formatCpf(cpf) {
-    const cpfDigits = cpf.replace(/\D/g, '');
-    if (cpfDigits.length !== 11) return cpf;
-    return cpfDigits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
-}
-
 async function runMargem(payload, onProgress, onLog){
   emitLogCb(onLog, 'info', `Payload recebido: ${JSON.stringify(payload)}`);
   
@@ -82,7 +75,7 @@ async function runMargem(payload, onProgress, onLog){
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   const ts = new Date().toISOString().replace(/[:.]/g,'-');
   const resultsPath = path.join(outDir, `resultado-${ts}.csv`);
-  try { fs.writeFileSync(resultsPath, 'CPF;OPERACAO;OBS\n', { encoding: 'utf8' }); } catch(e) {}
+  try { fs.writeFileSync(resultsPath, 'CPF;Status;Valor\n', { encoding: 'utf8' }); } catch(e) {}
 
   try {
     emitLogCb(onLog, 'info', `Navegando para ${url}`);
@@ -99,8 +92,8 @@ async function runMargem(payload, onProgress, onLog){
     for (let i = 0; i < cpfs.length; i++) {
       const currentCpf = cpfs[i];
       emitLogCb(onLog, 'info', `Processando ${i + 1}/${cpfs.length}: ${currentCpf}`);
-      let op = 'Falha';
-      let obs = '';
+      let status = '';
+      let valor = '';
 
       try {
         await navigateToConsulta(page, url, onLog);
@@ -115,40 +108,30 @@ async function runMargem(payload, onProgress, onLog){
         const buttonSelector = 'button:has-text("Consultar saldo")';
         await page.click(buttonSelector);
         
-        emitLogCb(onLog, 'info', 'Aguardando resultado aparecer no histórico de consultas...');
+        emitLogCb(onLog, 'info', 'Aguardando resultado...');
         
-        // CORREÇÃO: Usando o CPF formatado para encontrar o resultado
-        const formattedCpfForSearch = formatCpf(currentCpf);
-        const resultSelector = `xpath=//tr[contains(., '${formattedCpfForSearch}')]//td[contains(@class, 'table-status')]//span`;
-        
-        const resultEl = await page.waitForSelector(resultSelector, { timeout: 10000 });
-        
-        const resultText = (await resultEl.innerText()).trim();
-        obs = resultText;
+        // Aguarda a resposta da consulta
+        await page.waitForLoadState('networkidle', { timeout: 10000 });
 
-        if (obs.toLowerCase().includes('sucesso')) {
-            op = 'Sucesso';
+        // Tenta pegar o valor da margem
+        const saldo = await page.$eval('input.v-money.input[disabled]', input => input.value).catch(() => null);
+
+        if (saldo !== null) {
+            status = 'Sucesso';
+            valor = `Valor da Margem: ${saldo}`;
         } else {
-            op = 'Falha';
+            status = 'Falha';
+            valor = 'Falha ao consultar (CPF pode não ter o tempo mínimo ou vinculo empregaticio)';
         }
-        emitLogCb(onLog, 'info', `Resultado para ${currentCpf}: ${op} - ${obs}`);
+        emitLogCb(onLog, 'info', `Resultado para ${currentCpf}: ${status} - ${valor}`);
 
       } catch (e) {
-          obs = e.message || 'Erro desconhecido durante a consulta.';
-          emitLogCb(onLog, 'error', `Falha ao processar CPF ${currentCpf}: ${obs}`);
-          try {
-              const errorDir = path.join(outDir, 'erros');
-              if (!fs.existsSync(errorDir)) fs.mkdirSync(errorDir, { recursive: true });
-              const errorImagePath = path.join(errorDir, `erro-${currentCpf}-${Date.now()}.png`);
-              await page.screenshot({ path: errorImagePath });
-              emitLogCb(onLog, 'info', `Screenshot do erro salvo em: ${errorImagePath}`);
-              obs += ` | Screenshot: ${path.basename(errorImagePath)}`;
-          } catch (screenshotError) {
-              emitLogCb(onLog, 'error', `Falha ao tirar screenshot: ${screenshotError.message}`);
-          }
+          status = 'Falha';
+          valor = 'Falha ao consultar (CPF pode não ter o tempo mínimo ou vinculo empregaticio)';
+          emitLogCb(onLog, 'error', `Falha ao processar CPF ${currentCpf}: ${e.message}`);
       }
       
-      const line = `${currentCpf};${op};"${(obs || '').replace(/"/g, '""')}"\n`;
+      const line = `${currentCpf};${status};"${(valor || '').replace(/"/g, '""')}"\n`;
       fs.appendFileSync(resultsPath, line, { encoding: 'utf8' });
 
       if (typeof onProgress === 'function'){
