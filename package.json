@@ -1,26 +1,47 @@
 {
-"name": "lhamascred-autorizador",
-"version": "1.0.0",
-"description": "Aplicativo desktop Electron com automação Playwright para Autorizador em Massa",
-"main": "main.js",
-"scripts": {
-"start": "electron .",
-"postinstall": "npx playwright install --with-deps",
-"pack": "electron-builder --dir",
-"dist": "electron-builder"
-},
-"build": {
-"appId": "com.lhamascred.autorizador",
-"productName": "LhamasCred Autorizador",
-"files": ["**/*"],
-"win": { "target": "nsis" }
-},
-"dependencies": {
-"csv-parser": "^3.0.0",
-"electron": "^26.0.0",
-"playwright": "^1.42.0"
-},
-"devDependencies": {
-"electron-builder": "^24.0.0"
-}
+  "name": "lhamascred-consulta-margem",
+  "version": "1.0.0",
+  "description": "Aplicativo desktop para automacao de consulta de margem",
+  "author": "LhamasCred",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "postinstall": "npx playwright install --with-deps",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.lhamascred.consultamargem",
+    "productName": "LhamasCred - Consulta de Margem",
+    "icon": "build/icon.ico",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/",
+      "robo/",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
+    },
+    "asar": true
+  },
+  "dependencies": {
+    "csv-parser": "^3.0.0",
+    "playwright": "^1.42.0"
+  },
+  "devDependencies": {
+    "electron": "^26.0.0",
+    "electron-builder": "^24.13.3"
+  }
 }

@@ -1,1 +1,16 @@
-node_modules/
+# Dependencies
+/node_modules
+/robo/node_modules
+
+# Build output
+/dist
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+
+# Local environment variables
+.env
