@@ -3,14 +3,21 @@ const fs = require('fs');
 const path = require('path');
 const csv = require('csv-parser');
 
+// Função para remover acentos
+function removeAccents(str) {
+  if (typeof str !== 'string') return str;
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
 function delay(ms) { return new Promise(res => setTimeout(res, ms)); }
 
 function emitLogCb(onLog, level, message, meta){
-  const payload = { level, message, meta };
+  const cleanedMessage = removeAccents(message);
+  const payload = { level, message: cleanedMessage, meta };
   try{ if (typeof onLog === 'function') onLog(payload); }catch(e){}
-  if(level==='error') console.error(message, meta||'');
-  else if(level==='warn') console.warn(message, meta||'');
-  else console.log(message, meta||'');
+  if(level==='error') console.error(cleanedMessage, meta||'');
+  else if(level==='warn') console.warn(cleanedMessage, meta||'');
+  else console.log(cleanedMessage, meta||'');
 }
 
 function readCpfsFromCsv(filePath, onLog) {
@@ -26,7 +33,7 @@ function readCpfsFromCsv(filePath, onLog) {
                 }
             })
             .on('end', () => {
-                emitLogCb(onLog, 'info', `Leitura finalizada. Encontrados ${Array.from(new Set(cpfs)).length} CPFs únicos.`);
+                emitLogCb(onLog, 'info', `Leitura finalizada. Encontrados ${Array.from(new Set(cpfs)).length} CPFs unicos.`);
                 resolve(Array.from(new Set(cpfs)));
             })
             .on('error', (err) => {
@@ -39,16 +46,16 @@ function readCpfsFromCsv(filePath, onLog) {
 async function navigateToConsulta(page, baseUrl, onLog) {
     const targetUrlPart = '/clt/consultar';
     if (page.url().includes(targetUrlPart)) return;
-    emitLogCb(onLog, 'info', 'Navegando para a página de Consulta Margem.');
+    emitLogCb(onLog, 'info', 'Navegando para a pagina de Consulta Margem.');
     await page.goto(new URL(targetUrlPart, baseUrl).href, { timeout: 20000, waitUntil: 'networkidle' });
 }
 
 async function runMargem(payload, onProgress, onLog){
   emitLogCb(onLog, 'info', `Payload recebido: ${JSON.stringify(payload)}`);
-  
+
   const { url, email, password, options } = payload || {};
   const filePath = payload.filePath || payload.path;
-  
+
   if (!filePath) {
       const errorMsg = 'Nenhum arquivo CSV foi fornecido no payload.';
       emitLogCb(onLog, 'error', errorMsg);
@@ -59,7 +66,7 @@ async function runMargem(payload, onProgress, onLog){
   const cpfs = await readCpfsFromCsv(filePath, onLog);
 
   if (!cpfs || cpfs.length === 0) {
-    const errorMsg = 'Nenhum CPF válido foi encontrado para processar no arquivo CSV.';
+    const errorMsg = 'Nenhum CPF valido foi encontrado para processar no arquivo CSV.';
     emitLogCb(onLog, 'error', errorMsg);
     if (typeof onProgress === 'function') onProgress({ current: 1, total: 1, percent: 100, message: `Erro: ${errorMsg}` });
     return;
@@ -70,12 +77,13 @@ async function runMargem(payload, onProgress, onLog){
   const browser = await chromium.launch({ headless });
   const context = await browser.newContext();
   const page = await context.newPage();
-  
-  const outDir = path.join(process.cwd(), 'Relatórios Margem');
+
+  const outDir = path.join(process.cwd(), 'Relatorios Margem');
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   const ts = new Date().toISOString().replace(/[:.]/g,'-');
   const resultsPath = path.join(outDir, `resultado-${ts}.csv`);
-  try { fs.writeFileSync(resultsPath, 'CPF;Status;Valor\n', { encoding: 'utf8' }); } catch(e) {}
+  // Adiciona o BOM para garantir a codificação UTF-8 no Excel
+  try { fs.writeFileSync(resultsPath, '\uFEFF' + 'CPF;Status;Valor\n', { encoding: 'utf8' }); } catch(e) {}
 
   try {
     emitLogCb(onLog, 'info', `Navegando para ${url}`);
@@ -83,12 +91,12 @@ async function runMargem(payload, onProgress, onLog){
 
     if (email) await page.fill('input[type="email"], input[name*=email i]', email);
     if (password) await page.fill('input[type="password"], input[name*=pass i]', password);
-    
+
     await page.click('button[type="submit"], button:has-text("Fazer login")');
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(()=>{});
 
     await navigateToConsulta(page, url, onLog);
-    
+
     for (let i = 0; i < cpfs.length; i++) {
       const currentCpf = cpfs[i];
       emitLogCb(onLog, 'info', `Processando ${i + 1}/${cpfs.length}: ${currentCpf}`);
@@ -97,21 +105,20 @@ async function runMargem(payload, onProgress, onLog){
 
       try {
         await navigateToConsulta(page, url, onLog);
-        
+
         emitLogCb(onLog, 'info', 'Procurando campo CPF...');
         const cpfSelector = 'input[placeholder="000.000.000-00"]';
         const cpfInputHandle = await page.waitForSelector(cpfSelector, { state: 'visible', timeout: 10000 });
         await cpfInputHandle.fill(currentCpf);
         emitLogCb(onLog, 'info', `CPF ${currentCpf} inserido.`);
-        
-        emitLogCb(onLog, 'info', 'Clicando no botão de consulta...');
+
+        emitLogCb(onLog, 'info', 'Clicando no botao de consulta...');
         const buttonSelector = 'button:has-text("Consultar saldo")';
         await page.click(buttonSelector);
-        
+
         emitLogCb(onLog, 'info', 'Aguardando resultado...');
-        
+
         try {
-            // Aguarda pelo campo de resultado (sucesso) aparecer
             const saldoInput = await page.waitForSelector('input.v-money.input[disabled]', { state: 'visible', timeout: 15000 });
             const saldo = await saldoInput.inputValue();
 
@@ -120,37 +127,36 @@ async function runMargem(payload, onProgress, onLog){
                 valor = `Valor da Margem: ${saldo}`;
             } else {
                 status = 'Falha';
-                valor = 'Falha ao consultar (CPF pode não ter o tempo mínimo ou vinculo empregaticio)';
+                valor = 'Falha ao consultar (CPF pode nao ter o tempo minimo ou vinculo empregaticio)';
             }
             emitLogCb(onLog, 'info', `Resultado para ${currentCpf}: ${status} - ${valor}`);
 
         } catch (e) {
-            // Se o campo de sucesso não aparecer no tempo esperado, considera falha.
             status = 'Falha';
-            valor = 'Falha ao consultar (CPF pode não ter o tempo mínimo ou vinculo empregaticio)';
-            emitLogCb(onLog, 'warn', `Não foi possível obter a margem para o CPF ${currentCpf}. Provável falha na consulta.`);
+            valor = 'Falha ao consultar (CPF pode nao ter o tempo minimo ou vinculo empregaticio)';
+            emitLogCb(onLog, 'warn', `Nao foi possivel obter a margem para o CPF ${currentCpf}. Provavel falha na consulta.`);
         }
 
       } catch (e) {
           status = 'Falha';
-          valor = 'Falha ao consultar (CPF pode não ter o tempo mínimo ou vinculo empregaticio)';
+          valor = 'Falha ao consultar (CPF pode nao ter o tempo minimo ou vinculo empregaticio)';
           emitLogCb(onLog, 'error', `Erro inesperado ao processar CPF ${currentCpf}: ${e.message}`);
       }
-      
-      const line = `${currentCpf};${status};"${(valor || '').replace(/"/g, '""')}"\n`;
+
+      const line = `${currentCpf};${status};"${(removeAccents(valor) || '').replace(/"/g, '""')}"\n`;
       fs.appendFileSync(resultsPath, line, { encoding: 'utf8' });
 
       if (typeof onProgress === 'function'){
         const percent = Math.round(((i+1)/cpfs.length)*100);
         onProgress({ current: i+1, total: cpfs.length, percent, message: `Processado ${i+1}/${cpfs.length}` });
       }
-      await delay(500); // Aumentando o delay para 500ms
+      await delay(500);
     }
   } catch (err) {
-    emitLogCb(onLog, 'error', 'Erro catastrófico durante execução: '+(err && err.message), { stack: err && err.stack });
+    emitLogCb(onLog, 'error', 'Erro catastrofico durante execucao: '+(err && err.message), { stack: err && err.stack });
   } finally {
     await browser.close();
-    emitLogCb(onLog,'info','Finalizando execução da margem');
+    emitLogCb(onLog,'info','Finalizando execucao da margem');
   }
 }
 
