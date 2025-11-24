@@ -3,7 +3,6 @@ const fs = require('fs');
 const path = require('path');
 const csv = require('csv-parser');
 
-// Função para remover acentos
 function removeAccents(str) {
   if (typeof str !== 'string') return str;
   return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -53,7 +52,7 @@ async function navigateToConsulta(page, baseUrl, onLog) {
 async function runMargem(payload, onProgress, onLog){
   emitLogCb(onLog, 'info', `Payload recebido: ${JSON.stringify(payload)}`);
 
-  const { url, email, password, options } = payload || {};
+  const { url, email, password, options, reportsPath } = payload || {};
   const filePath = payload.filePath || payload.path;
 
   if (!filePath) {
@@ -78,12 +77,11 @@ async function runMargem(payload, onProgress, onLog){
   const context = await browser.newContext();
   const page = await context.newPage();
 
-  const outDir = path.join(process.cwd(), 'Relatorios Margem');
+  const outDir = reportsPath || path.join(process.cwd(), 'Relatorios Margem');
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   const ts = new Date().toISOString().replace(/[:.]/g,'-');
-  const resultsPath = path.join(outDir, `resultado-${ts}.csv`);
-  // Adiciona o BOM para garantir a codificação UTF-8 no Excel
-  try { fs.writeFileSync(resultsPath, '\uFEFF' + 'CPF;Status;Valor\n', { encoding: 'utf8' }); } catch(e) {}
+  const resultsFilePath = path.join(outDir, `resultado-margem-${ts}.csv`);
+  try { fs.writeFileSync(resultsFilePath, '\uFEFF' + 'CPF;Status;Valor\n', { encoding: 'utf8' }); } catch(e) {}
 
   try {
     emitLogCb(onLog, 'info', `Navegando para ${url}`);
@@ -144,7 +142,7 @@ async function runMargem(payload, onProgress, onLog){
       }
 
       const line = `${currentCpf};${status};"${(removeAccents(valor) || '').replace(/"/g, '""')}"\n`;
-      fs.appendFileSync(resultsPath, line, { encoding: 'utf8' });
+      fs.appendFileSync(resultsFilePath, line, { encoding: 'utf8' });
 
       if (typeof onProgress === 'function'){
         const percent = Math.round(((i+1)/cpfs.length)*100);

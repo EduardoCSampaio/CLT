@@ -42,11 +42,17 @@ ipcMain.on("open-page", (event, page) => {
 
 ipcMain.on("start-automation", async (event, payload) => {
   const filePath = typeof payload === "string" ? payload : payload && payload.filePath;
-  const options = payload && payload.options ? payload.options : {};
+  let options = payload && payload.options ? payload.options : {};
 
   if (!filePath || typeof filePath !== "string") {
     return event.reply("automation-finished", "Erro: Nenhum arquivo recebido.");
   }
+
+  const reportsPath = path.join(app.getPath('userData'), 'relatorios');
+  if (!fs.existsSync(reportsPath)) {
+      fs.mkdirSync(reportsPath, { recursive: true });
+  }
+  options = { ...options, reportsPath };
 
   try {
     const runAutorizador = require("./robo/autorizador.js");
@@ -63,15 +69,11 @@ ipcMain.on("start-automation", async (event, payload) => {
 });
 
 ipcMain.on("start-margem", async (event, payload) => {
-  // **THE FIX IS HERE**
-  // Get the correct, writable path for reports and add it to the payload.
   const reportsPath = path.join(app.getPath('userData'), 'relatorios');
-  // Ensure the directory exists before starting the robot.
   if (!fs.existsSync(reportsPath)) {
       fs.mkdirSync(reportsPath, { recursive: true });
   }
 
-  // Add the path to the payload for the robot to use.
   const newPayload = { ...payload, reportsPath };
 
   event.reply("automation-log", { level: "info", message: `Payload final enviado para o robô: ${JSON.stringify(newPayload)}` });
@@ -81,7 +83,6 @@ ipcMain.on("start-margem", async (event, payload) => {
     const progressCb = (progress) => event.reply("automation-progress", progress);
     const logCb = (log) => event.reply("automation-log", log);
 
-    // Pass the MODIFIED payload with the correct path.
     await runMargem(newPayload, progressCb, logCb);
 
     event.reply("automation-finished", "Consulta de margem concluída com sucesso!");
