@@ -17,35 +17,41 @@ const margemHeadless = document.getElementById("margemHeadless");
 const margemFile = document.getElementById("margemFile");
 const btnOpenCsvFolder = document.getElementById("btn-open-csv-folder");
 
-// Navigation from index -> autorizador
+// --- General Navigation ---
+
+// From index -> autorizador
 if (btnAutorizador && window.electronAPI && typeof window.electronAPI.openPage === "function") {
   btnAutorizador.addEventListener("click", () => {
     window.electronAPI.openPage("autorizador");
   });
 }
 
+// From index -> margem
 if (btnMargem && window.electronAPI && typeof window.electronAPI.openPage === "function") {
   btnMargem.addEventListener("click", () => {
     window.electronAPI.openPage("margem");
   });
 }
 
+// From index -> open CSVs folder
 if (btnOpenCsvFolder && window.electronAPI && typeof window.electronAPI.openCsvFolder === "function") {
     btnOpenCsvFolder.addEventListener("click", () => {
         window.electronAPI.openCsvFolder();
     });
 }
 
+// Back to index (works on any page with the #backToIndex button)
+if (backToIndexBtn && window.electronAPI && typeof window.electronAPI.openPage === "function") {
+  backToIndexBtn.addEventListener("click", () => {
+    window.electronAPI.openPage("index");
+  });
+}
+
+
+// --- Page-Specific Logic ---
+
 // Start automation (only present on autorizador.html)
 if (startBtn) {
-  // Voltar para index.html
-  if (backToIndexBtn && window.electronAPI && typeof window.electronAPI.openPage === "function") {
-    backToIndexBtn.addEventListener("click", () => {
-      window.electronAPI.openPage("index");
-    });
-  }
-
-  
   startBtn.addEventListener("click", () => {
     if (!fileInput || !fileInput.files.length) {
       alert("Selecione um arquivo primeiro!");
@@ -86,8 +92,10 @@ if (startBtn) {
       if (logArea) appendLog("Erro: electronAPI.startAutomation não disponível");
     }
   });
+}
 
-
+// Listen for progress/log events (relevant on pages with a log area)
+if (logArea) {
   // Recebe progresso
   if (window.electronAPI && typeof window.electronAPI.onProgress === "function") {
     window.electronAPI.onProgress((data) => {
@@ -101,7 +109,6 @@ if (startBtn) {
   if (window.electronAPI && typeof window.electronAPI.onLog === "function") {
     window.electronAPI.onLog((log) => {
       try {
-        // log can be { level, message, meta }
         const meta = log && log.meta ? ` ${JSON.stringify(log.meta)}` : "";
         appendLog(`${(log && log.level) || "info"}: ${log && log.message}${meta}`);
       } catch (e) {
@@ -119,28 +126,16 @@ if (startBtn) {
   }
 }
 
-// Helper to append timestamped logs to the UI area
-function appendLog(text) {
-  try {
-    const now = new Date();
-    const ts = now.toLocaleTimeString();
-    logArea.textContent += `[${ts}] ${text}\n`;
-    // auto-scroll to bottom
-    logArea.scrollTop = logArea.scrollHeight;
-  } catch (e) {
-    // ignore if logArea not present
-  }
-}
 
-// Auto-focus email field when on margem page to prompt credentials
-try {
-  if (margemEmail) {
-    margemEmail.focus();
-  }
-} catch (e) {}
-
-// Attach start handler for margem page independently so it works when margem.html is loaded
+// Attach start handler for margem page
 if (startMargemBtn) {
+  // Auto-focus email field to prompt credentials
+  try {
+    if (margemEmail) {
+      margemEmail.focus();
+    }
+  } catch (e) {}
+
   startMargemBtn.addEventListener("click", () => {
   const url = "https://admin.bancoprata.com.br/";
   const email = margemEmail ? margemEmail.value : "";
@@ -148,7 +143,6 @@ if (startMargemBtn) {
   const headless = margemHeadless ? !!margemHeadless.checked : false;
   const filePath = (margemFile && margemFile.files && margemFile.files[0]) ? margemFile.files[0].path : null;
 
-    // Require credentials to standardize per-client access
     if (!email || !password) {
       alert("Informe seu E-MAIL e SENHA para login antes de iniciar a consulta.");
       if (margemEmail) margemEmail.focus();
@@ -165,4 +159,19 @@ if (startMargemBtn) {
       appendLog("Erro: startMargem não disponível");
     }
   });
+}
+
+// --- Helper Functions ---
+
+// Helper to append timestamped logs to the UI area
+function appendLog(text) {
+  if (!logArea) return;
+  try {
+    const now = new Date();
+    const ts = now.toLocaleTimeString();
+    logArea.textContent += `[${ts}] ${text}\n`;
+    logArea.scrollTop = logArea.scrollHeight;
+  } catch (e) {
+    // ignore if logArea not present
+  }
 }
