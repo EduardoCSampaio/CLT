@@ -81,7 +81,7 @@ async function runMargem(payload, onProgress, onLog){
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   const ts = new Date().toISOString().replace(/[:.]/g,'-');
   const resultsFilePath = path.join(outDir, `resultado-margem-${ts}.csv`);
-  try { fs.writeFileSync(resultsFilePath, '\uFEFF' + 'CPF;Status;Valor\n', { encoding: 'utf8' }); } catch(e) {}
+  const results = [];
 
   try {
     emitLogCb(onLog, 'info', `Navegando para ${url}`);
@@ -98,51 +98,52 @@ async function runMargem(payload, onProgress, onLog){
     for (let i = 0; i < cpfs.length; i++) {
       const currentCpf = cpfs[i];
       emitLogCb(onLog, 'info', `Processando ${i + 1}/${cpfs.length}: ${currentCpf}`);
-      let status = '';
-      let valor = '';
+      let status = 'Falha';
+      let valor = 'Falha ao consultar (CPF pode nao ter o tempo minimo ou vinculo empregaticio)';
 
       try {
         await navigateToConsulta(page, url, onLog);
 
         emitLogCb(onLog, 'info', 'Procurando campo CPF...');
         const cpfSelector = 'input[placeholder="000.000.000-00"]';
-        const cpfInputHandle = await page.waitForSelector(cpfSelector, { state: 'visible', timeout: 10000 });
-        await cpfInputHandle.fill(currentCpf);
+        await page.waitForSelector(cpfSelector, { state: 'visible', timeout: 10000 });
+        await page.fill(cpfSelector, currentCpf);
         emitLogCb(onLog, 'info', `CPF ${currentCpf} inserido.`);
 
         emitLogCb(onLog, 'info', 'Clicando no botao de consulta...');
-        const buttonSelector = 'button:has-text("Consultar saldo")';
-        await page.click(buttonSelector);
+        await page.click('button:has-text("Consultar saldo")');
 
         emitLogCb(onLog, 'info', 'Aguardando resultado...');
 
-        try {
-            const saldoInput = await page.waitForSelector('input.v-money.input[disabled]', { state: 'visible', timeout: 15000 });
-            const saldo = await saldoInput.inputValue();
+        for (let attempt = 0; attempt < 5; attempt++) {
+            await delay(3000); 
 
-            if (saldo) {
-                status = 'Sucesso';
-                valor = `Valor da Margem: ${saldo}`;
+            const isProcessing = await page.isVisible('p.tag.is-info:has-text("Processando")');
+            const isSuccess = await page.isVisible('p.tag.is-success:has-text("Sucesso")');
+
+            if (isSuccess) {
+                const saldoInput = await page.waitForSelector('input.v-money.input[disabled]', { state: 'visible', timeout: 5000 });
+                const saldo = await saldoInput.inputValue();
+                if (saldo) {
+                    status = 'Sucesso';
+                    valor = `Valor da Margem: ${saldo}`;
+                }
+                emitLogCb(onLog, 'info', `Resultado para ${currentCpf}: ${status} - ${valor}`);
+                break;
+            } else if (isProcessing) {
+                emitLogCb(onLog, 'info', `CPF ${currentCpf} ainda em processamento. Tentativa ${attempt + 1}/5.`);
+                if (attempt < 4) await page.reload({ waitUntil: 'networkidle' });
             } else {
-                status = 'Falha';
-                valor = 'Falha ao consultar (CPF pode nao ter o tempo minimo ou vinculo empregaticio)';
+                emitLogCb(onLog, 'warn', `Nao foi possivel obter a margem para o CPF ${currentCpf}. Status desconhecido.`);
+                break;
             }
-            emitLogCb(onLog, 'info', `Resultado para ${currentCpf}: ${status} - ${valor}`);
-
-        } catch (e) {
-            status = 'Falha';
-            valor = 'Falha ao consultar (CPF pode nao ter o tempo minimo ou vinculo empregaticio)';
-            emitLogCb(onLog, 'warn', `Nao foi possivel obter a margem para o CPF ${currentCpf}. Provavel falha na consulta.`);
         }
 
       } catch (e) {
-          status = 'Falha';
-          valor = 'Falha ao consultar (CPF pode nao ter o tempo minimo ou vinculo empregaticio)';
           emitLogCb(onLog, 'error', `Erro inesperado ao processar CPF ${currentCpf}: ${e.message}`);
       }
 
-      const line = `${currentCpf};${status};"${(removeAccents(valor) || '').replace(/"/g, '""')}"\n`;
-      fs.appendFileSync(resultsFilePath, line, { encoding: 'utf8' });
+      results.push({ cpf: currentCpf, status, valor });
 
       if (typeof onProgress === 'function'){
         const percent = Math.round(((i+1)/cpfs.length)*100);
@@ -153,6 +154,16 @@ async function runMargem(payload, onProgress, onLog){
   } catch (err) {
     emitLogCb(onLog, 'error', 'Erro catastrofico durante execucao: '+(err && err.message), { stack: err && err.stack });
   } finally {
+    const csvHeader = 'CPF;Status;Valor\n';
+    const csvBody = results.map(r => `${r.cpf};${r.status};"${(removeAccents(r.valor) || '').replace(/"/g, '""')}"`).join('\n');
+    const csvContent = '\uFEFF' + csvHeader + csvBody;
+    try {
+      fs.writeFileSync(resultsFilePath, csvContent, { encoding: 'utf8' });
+      emitLogCb(onLog, 'info', `Relatorio final gerado em: ${resultsFilePath}`);
+    } catch(e) {
+      emitLogCb(onLog, 'error', `Falha ao escrever o arquivo de resultado final: ${e.message}`);
+    }
+
     await browser.close();
     emitLogCb(onLog,'info','Finalizando execucao da margem');
   }
