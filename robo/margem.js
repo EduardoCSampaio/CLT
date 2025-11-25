@@ -81,7 +81,8 @@ async function runMargem(payload, onProgress, onLog){
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   const ts = new Date().toISOString().replace(/[:.]/g,'-');
   const resultsFilePath = path.join(outDir, `resultado-margem-${ts}.csv`);
-  const results = [];
+  
+  const results = cpfs.map(cpf => ({ cpf, status: 'Nao Processado', valor: '' }));
 
   try {
     emitLogCb(onLog, 'info', `Navegando para ${url}`);
@@ -95,62 +96,92 @@ async function runMargem(payload, onProgress, onLog){
 
     await navigateToConsulta(page, url, onLog);
 
+    emitLogCb(onLog, 'info', 'Iniciando submissao de CPFs...');
     for (let i = 0; i < cpfs.length; i++) {
       const currentCpf = cpfs[i];
-      emitLogCb(onLog, 'info', `Processando ${i + 1}/${cpfs.length}: ${currentCpf}`);
-      let status = 'Falha';
-      let valor = 'Falha ao consultar (CPF pode nao ter o tempo minimo ou vinculo empregaticio)';
-
       try {
         await navigateToConsulta(page, url, onLog);
 
-        emitLogCb(onLog, 'info', 'Procurando campo CPF...');
         const cpfSelector = 'input[placeholder="000.000.000-00"]';
         await page.waitForSelector(cpfSelector, { state: 'visible', timeout: 10000 });
         await page.fill(cpfSelector, currentCpf);
-        emitLogCb(onLog, 'info', `CPF ${currentCpf} inserido.`);
-
-        emitLogCb(onLog, 'info', 'Clicando no botao de consulta...');
         await page.click('button:has-text("Consultar saldo")');
 
-        emitLogCb(onLog, 'info', 'Aguardando resultado...');
+        emitLogCb(onLog, 'info', `Submetido ${i + 1}/${cpfs.length}: ${currentCpf}`);
+        if (typeof onProgress === 'function'){
+          const percent = Math.round(((i + 1) / cpfs.length / 2) * 100);
+          onProgress({ current: i + 1, total: cpfs.length, percent, message: `Submetendo ${i+1}/${cpfs.length}` });
+        }
+        await delay(1000);
+      } catch(e) {
+        emitLogCb(onLog, 'error', `Erro ao submeter CPF ${currentCpf}: ${e.message}`);
+      }
+    }
 
-        for (let attempt = 0; attempt < 5; attempt++) {
-            await delay(3000); 
+    emitLogCb(onLog, 'info', 'Todos os CPFs foram submetidos. Aguardando processamento final...');
+    for (let attempt = 0; attempt < 15; attempt++) {
+        await page.reload({ waitUntil: 'networkidle' });
+        await delay(2000);
+        const processingCount = await page.locator('p.tag.is-info:has-text("Processando")').count();
+        if (processingCount === 0) {
+            emitLogCb(onLog, 'info', 'Nenhum CPF em processamento. Iniciando coleta de resultados.');
+            break;
+        }
+        emitLogCb(onLog, 'info', `${processingCount} CPFs ainda estao processando. Tentativa ${attempt + 1}/15.`);
+        if (attempt === 14) {
+            emitLogCb(onLog, 'warn', 'Tempo de espera excedido. Alguns CPFs podem nao ter sido processados.');
+        }
+        await delay(3000);
+    }
 
-            const isProcessing = await page.isVisible('p.tag.is-info:has-text("Processando")');
-            const isSuccess = await page.isVisible('p.tag.is-success:has-text("Sucesso")');
+    emitLogCb(onLog, 'info', 'Extraindo resultados da pagina...');
+    const resultElements = await page.locator('div.box').all();
+    emitLogCb(onLog, 'info', `Encontrados ${resultElements.length} elementos de resultado na pagina.`);
 
-            if (isSuccess) {
-                const saldoInput = await page.waitForSelector('input.v-money.input[disabled]', { state: 'visible', timeout: 5000 });
-                const saldo = await saldoInput.inputValue();
-                if (saldo) {
-                    status = 'Sucesso';
-                    valor = `Valor da Margem: ${saldo}`;
-                }
-                emitLogCb(onLog, 'info', `Resultado para ${currentCpf}: ${status} - ${valor}`);
-                break;
-            } else if (isProcessing) {
-                emitLogCb(onLog, 'info', `CPF ${currentCpf} ainda em processamento. Tentativa ${attempt + 1}/5.`);
-                if (attempt < 4) await page.reload({ waitUntil: 'networkidle' });
-            } else {
-                emitLogCb(onLog, 'warn', `Nao foi possivel obter a margem para o CPF ${currentCpf}. Status desconhecido.`);
-                break;
-            }
+    for (const element of resultElements) {
+        let cpfText = '';
+        try {
+            cpfText = await element.locator('p, span, strong').filter({ hasText: /[0-9]{3}\.[0-9]{3}\.[0-9]{3}-[0-9]{2}/ }).first().innerText();
+        } catch(e) {
+            continue;
         }
 
-      } catch (e) {
-          emitLogCb(onLog, 'error', `Erro inesperado ao processar CPF ${currentCpf}: ${e.message}`);
-      }
+        const cpfOnPage = (cpfText || '').replace(/\D/g, '');
+        if (cpfOnPage.length !== 11) continue;
 
-      results.push({ cpf: currentCpf, status, valor });
+        const resultIndex = results.findIndex(r => r.cpf === cpfOnPage);
+        if (resultIndex === -1) {
+            emitLogCb(onLog, 'warn', `CPF ${cpfOnPage} encontrado na pagina mas nao estava na lista original.`);
+            continue;
+        }
 
-      if (typeof onProgress === 'function'){
-        const percent = Math.round(((i+1)/cpfs.length)*100);
-        onProgress({ current: i+1, total: cpfs.length, percent, message: `Processado ${i+1}/${cpfs.length}` });
-      }
-      await delay(500);
+        let status = 'Falha';
+        let valor = 'Nao foi possivel obter o valor.';
+
+        const isSuccess = await element.locator('p.tag.is-success:has-text("Sucesso")').isVisible();
+        const isProcessing = await element.locator('p.tag.is-info:has-text("Processando")').isVisible();
+
+        if (isSuccess) {
+            status = 'Sucesso';
+            try {
+                const saldo = await element.locator('input.v-money.input[disabled]').inputValue();
+                valor = `Valor da Margem: ${saldo}`;
+            } catch (e) {
+                valor = 'Sucesso (valor nao extraido)';
+            }
+        } else if (isProcessing) {
+            status = 'Ainda Processando';
+            valor = 'Consulta nao finalizou a tempo.';
+        }
+
+        results[resultIndex] = { ...results[resultIndex], status, valor };
+        emitLogCb(onLog, 'info', `Resultado para ${cpfOnPage}: ${status} - ${valor}`);
     }
+
+    if (typeof onProgress === 'function'){
+      onProgress({ current: cpfs.length, total: cpfs.length, percent: 100, message: `Processamento concluido. Gerando relatorio...` });
+    }
+
   } catch (err) {
     emitLogCb(onLog, 'error', 'Erro catastrofico durante execucao: '+(err && err.message), { stack: err && err.stack });
   } finally {
